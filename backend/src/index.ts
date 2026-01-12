@@ -22,6 +22,31 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import type { Request, Response, NextFunction } from 'express';
 import express from 'express';
 import jwt from 'jsonwebtoken';
@@ -37,7 +62,10 @@ import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import Groq from 'groq-sdk'; // Changed from GoogleGenerativeAI to Groq
+import Groq from 'groq-sdk'; 
+import TelegramBot from 'node-telegram-bot-api';
+import schedule from 'node-schedule';
+
 
 dotenv.config();
 
@@ -48,6 +76,8 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || ''; // Changed from GEMINI_API_
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 const MONGODB_URI = process.env.MONGODB_URI!;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_IDS = process.env.TELEGRAM_CHAT_IDS?.split(',').map(id => id.trim()) || [];
 
 // Validate required environment variables
 if (!GROQ_API_KEY) {
@@ -71,9 +101,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   createdAt: { type: Date, default: Date.now }
 });
-
 const User = mongoose.model('User', userSchema);
-
 // Content Schema
 const contentSchema = new mongoose.Schema({
   title: { type: String, required: true },
@@ -83,9 +111,7 @@ const contentSchema = new mongoose.Schema({
   tags: [{ type: String }],
   createdAt: { type: Date, default: Date.now }
 });
-
 const Content = mongoose.model('Content', contentSchema);
-
 // PDF Collection Schema
 const pdfCollectionSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -107,6 +133,23 @@ const shareLinkSchema = new mongoose.Schema({
 });
 
 const ShareLink = mongoose.model('ShareLink', shareLinkSchema);
+// Reminder Schema
+const reminderSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  title: { type: String, required: true },
+  description: { type: String },
+  reminderTime: { type: Date, required: true },
+  isActive: { type: Boolean, default: true },
+  repeat: { 
+    type: String, 
+    enum: ['once', 'daily', 'weekly', 'monthly'],
+    default: 'once'
+  },
+  telegramChatId: { type: String },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const Reminder = mongoose.model('Reminder', reminderSchema);
 
 // ============ HELPER FUNCTIONS ============
 const hashPassword = async (password: string): Promise<string> => {
@@ -209,7 +252,6 @@ const getGroqResponse = async (prompt: string, context?: string) => {
 };
 
 const getEmbedding = async (text: string): Promise<number[]> => {
-  // Simple TF-IDF like embedding (768 dimensions)
   const words = text.toLowerCase().split(/\W+/);
   const uniqueWords = [...new Set(words)];
   const embedding = new Array(768).fill(0);
@@ -222,7 +264,97 @@ const getEmbedding = async (text: string): Promise<number[]> => {
   return embedding;
 };
 
+// Telegram Reminder Bot
+class TelegramReminderBot {
+  public bot: TelegramBot | null = null;
+  public isActive = true;
 
+  constructor() {
+    if (TELEGRAM_BOT_TOKEN) {
+      console.log(TELEGRAM_BOT_TOKEN)
+      this.startBot();
+    }
+  }
+
+  private startBot() {
+    try {
+      this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+      this.setupHandlers();
+      this.isActive = true;
+      console.log('🤖 Telegram Reminder Bot started');
+    } catch (error) {
+      console.error('❌ Failed to start Telegram bot:', error);
+    }
+  }
+
+  private setupHandlers() {
+    if (!this.bot) return;
+
+    // Start command
+    this.bot.onText(/\/start/, async (msg: any) => {
+      const chatId = msg.chat.id;
+      await this.sendMessage(chatId, 
+        '✨ Cosmic Mind Reminders\n\n' +
+        'I will send you reminders from your knowledge base.\n' +
+        'Set reminders in the web app and I\'ll notify you here.'
+      );
+    });
+
+    // Help command
+    this.bot.onText(/\/help/, async (msg : any) => {
+      const chatId = msg.chat.id;
+      await this.sendMessage(chatId,
+        '📱 **Commands:**\n' +
+        '/start - Start the bot\n' +
+        '/help - Show this help\n\n' +
+        '💡 **To set reminders:**\n' +
+        '1. Go to web app\n' +
+        '2. Set reminders\n' +
+        '3. Get notifications here'
+      );
+    });
+
+    // Quick reminder
+    this.bot.onText(/\/remind (.+)/, async (msg:any, match:any) => {
+      const chatId = msg.chat.id;
+      if (match) {
+        await this.sendMessage(chatId, 
+          `✅ I'll remind you: "${match[1]}"\n\n` +
+          'For now, please use the web app to set timed reminders.'
+        );
+      }
+    });
+  }
+
+  // Send message to user
+  async sendMessage(chatId: string | number, message: string) {
+    if (!this.bot || !this.isActive) return false;
+    
+    try {
+      await this.bot.sendMessage(chatId, message);
+      return true;
+    } catch (error) {
+      console.error('Failed to send Telegram message:', error);
+      return false;
+    }
+  }
+
+  // Send notification to all users
+  async sendNotification(message: string) {
+    if (!this.bot || !this.isActive || TELEGRAM_CHAT_IDS.length === 0) return;
+    
+    for (const chatId of TELEGRAM_CHAT_IDS) {
+      try {
+        await this.sendMessage(chatId, `🔔 ${message}`);
+      } catch (error) {
+        console.error(`Failed to send to ${chatId}:`, error);
+      }
+    }
+  }
+}
+
+// Create bot instance
+const telegramBot = new TelegramReminderBot();
 
 // ============ MIDDLEWARE ============
 const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
@@ -245,6 +377,8 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
   req.username = decoded.username;
   next();
 };
+
+
 
 // Extend Express Request type
 declare global {
@@ -698,7 +832,6 @@ app.post("/api/v1/pdf/upload", authMiddleware, upload.single("pdf"), async (req,
   }
 });
 
-
 app.get('/api/v1/pdf/collections', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId!;
@@ -955,6 +1088,190 @@ app.get('/api/v1/brain/:shareLink', async (req, res) => {
   }
 });
 
+// ============ REMINDER ENDPOINTS ============
+
+// Create a reminder
+app.post('/api/v1/reminders', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const { title, description, reminderTime, repeat, telegramChatId } = req.body;
+
+    if (!title || !reminderTime) {
+      return res.status(400).json({ message: 'Title and reminder time are required' });
+    }
+
+    const reminder = new Reminder({
+      userId,
+      title,
+      description: description || '',
+      reminderTime: new Date(reminderTime),
+      repeat: repeat || 'once',
+      telegramChatId: telegramChatId || '',
+      isActive: true
+    });
+
+    await reminder.save();
+
+    // Schedule the reminder
+    scheduleReminder(reminder);
+
+    res.status(201).json({
+      success: true,
+      message: 'Reminder created successfully',
+      reminder: {
+        id: reminder._id,
+        title: reminder.title,
+        reminderTime: reminder.reminderTime,
+        repeat: reminder.repeat
+      }
+    });
+
+  } catch (error) {
+    console.error('Create reminder error:', error);
+    res.status(500).json({ message: 'Failed to create reminder' });
+  }
+});
+
+// Get user's reminders
+app.get('/api/v1/reminders', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const reminders = await Reminder.find({ userId })
+      .sort({ reminderTime: 1 })
+      .select('title description reminderTime repeat isActive');
+
+    const activeReminders = reminders.filter(r => r.isActive);
+    const pastReminders = reminders.filter(r => !r.isActive);
+
+    res.json({
+      activeReminders,
+      pastReminders,
+      total: reminders.length,
+      activeCount: activeReminders.length
+    });
+
+  } catch (error) {
+    console.error('Get reminders error:', error);
+    res.status(500).json({ message: 'Failed to get reminders' });
+  }
+});
+
+// Delete a reminder
+app.delete('/api/v1/reminders/:id', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const reminderId = req.params.id;
+
+    const reminder = await Reminder.findOneAndDelete({
+      _id: reminderId,
+      userId
+    });
+
+    if (!reminder) {
+      return res.status(404).json({ message: 'Reminder not found' });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Reminder deleted successfully' 
+    });
+
+  } catch (error) {
+    console.error('Delete reminder error:', error);
+    res.status(500).json({ message: 'Failed to delete reminder' });
+  }
+});
+
+// Toggle reminder active status
+app.put('/api/v1/reminders/:id/toggle', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const reminderId = req.params.id;
+
+    const reminder = await Reminder.findOne({
+      _id: reminderId,
+      userId
+    });
+
+    if (!reminder) {
+      return res.status(404).json({ message: 'Reminder not found' });
+    }
+
+    reminder.isActive = !reminder.isActive;
+    await reminder.save();
+
+    res.json({
+      success: true,
+      message: reminder.isActive ? 'Reminder activated' : 'Reminder deactivated',
+      isActive: reminder.isActive
+    });
+
+  } catch (error) {
+    console.error('Toggle reminder error:', error);
+    res.status(500).json({ message: 'Failed to toggle reminder' });
+  }
+});
+
+
+function scheduleReminder(reminder: any) {
+  const reminderTime = new Date(reminder.reminderTime);
+  const now = new Date();
+  
+  console.log(`⏰ Scheduling: "${reminder.title}"`);
+  console.log(`   Scheduled for: ${reminderTime.toLocaleString()}`);
+  console.log(`   Current time: ${now.toLocaleString()}`);
+  console.log(`   Time difference: ${Math.round((reminderTime.getTime() - now.getTime()) / 1000)} seconds`);
+  
+  // If time is in the past, skip scheduling
+  if (reminderTime <= now) {
+    console.log(`⚠️ Skipping: Reminder time is in the past`);
+    return;
+  }
+  
+  // Schedule the job
+  const job = schedule.scheduleJob(reminderTime, async function() {
+    console.log(`🔔 REMINDER EXECUTING: ${reminder.title}`);
+    
+    if (telegramBot && telegramBot.bot) {
+      try {
+        const message = `🔔 **Reminder:** ${reminder.title}\n` +
+                       `${reminder.description || ''}\n\n` +
+                       `⏰ Time: ${reminderTime.toLocaleString()}`;
+        
+        // Send to the chat ID from the reminder
+        const chatId = reminder.telegramChatId || '7377850240';
+        await telegramBot.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        console.log(`✅ Reminder sent to Telegram (${chatId}): ${reminder.title}`);
+        
+      } catch (error: any) {
+        console.error(`❌ Telegram error:`, error.message);
+        
+        // Try again after 5 seconds
+        setTimeout(async () => {
+          try {
+            await telegramBot!.bot!.sendMessage('7377850240', 
+              `🔄 Retry: ${reminder.title}\n${error.message.substring(0, 100)}`,
+              { parse_mode: 'Markdown' }
+            );
+          } catch (retryError) {
+            console.error('❌ Retry also failed');
+          }
+        }, 5000);
+      }
+    } else {
+      console.log('❌ Telegram bot not available');
+    }
+  });
+  
+  if (job) {
+    console.log(`✅ Successfully scheduled: "${reminder.title}" for ${reminderTime.toLocaleString()}`);
+  } else {
+    console.error(`❌ FAILED to schedule: "${reminder.title}"`);
+  }
+}
+
+
+
 // 🏥 HEALTH CHECK
 app.get('/api/v1/health', async (req, res) => {
   try {
@@ -986,19 +1303,10 @@ app.get('/api/v1/health', async (req, res) => {
   }
 });
 
-// Error Handler
-app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error('Server error:', error);
-  res.status(500).json({ message: 'Internal server error' });
-});
 
 // 🚀 START SERVER
 app.listen(PORT, () => {
   console.log(`🚀 Cosmic Mind backend running on port ${PORT}`);
-  console.log(`🔗 Health: http://localhost:${PORT}/api/v1/health`);
-  console.log(`🗄️  MongoDB: ${MONGODB_URI}`);
-  console.log(`🤖 AI Provider: Groq Cloud ${GROQ_API_KEY ? '✅' : '❌ (Get FREE key: https://console.groq.com)'}`);
-  console.log(`🔑 API Key Status: ${GROQ_API_KEY ? 'Configured' : 'Not Configured'}`);
 });
 
 // Export for testing
