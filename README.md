@@ -17,8 +17,9 @@ Protected routes using middleware
 
 Token-based Telegram account linking
 
+<img width="1338" height="893" alt="Screenshot 2026-01-15 201204" src="https://github.com/user-attachments/assets/77186a9a-0245-4112-8e14-9bc46d6a8b04" />
+
 📚 Content Management
-![Uploading Screenshot 2026-01-15 201204.png…]()
 
 Save:
 
