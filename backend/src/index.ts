@@ -1,51 +1,3 @@
-// // // // // // // // import express from 'express'
-// // // // // // // // import dotenv from 'dotenv'
-// // // // // // // // import { signupSchena } from './types/types.js'
-// // // // // // // // dotenv.config()
-
-// // // // // // // // const app = express()
-
-// // // // // // // // app.use(express.json)
-
-// // // // // // // // app.post('/api/v1/auth/signup', async (req,res)=>{
-// // // // // // // //     const {data,success} = signupSchena.safeParse(req.body)
-// // // // // // // // })
-// // // // // // // // app.post('/api/v1/auth/signin', async (req,res)=>{})
-
-// // // // // // // // app.post('/api/v1/content', async (req,res)=>{})
-// // // // // // // // app.get('/api/v1/content', async (req,res)=>{})
-// // // // // // // // app.delete('/api/v1/content/delete/:id', async (req,res)=>{})
-// // // // // // // // app.post('/api/v1/brain/share', async (req,res)=>{})
-
-// // // // // // // // app.listen(3000)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 import type { Request, Response, NextFunction } from 'express';
 import express from 'express';
@@ -79,11 +31,6 @@ const MONGODB_URI = process.env.MONGODB_URI!;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_CHAT_IDS = process.env.TELEGRAM_CHAT_IDS?.split(',').map(id => id.trim()) || [];
 
-// Validate required environment variables
-if (!GROQ_API_KEY) {
-  console.error('⚠️  GROQ_API_KEY is required. Get FREE key from: https://console.groq.com');
-  console.log('ℹ️  Running in demo mode without AI functionality');
-}
 
 // MongoDB Connection
 mongoose.connect(MONGODB_URI)
@@ -99,9 +46,14 @@ mongoose.connect(MONGODB_URI)
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+   telegramChatId: { type: String, unique: true, sparse: true }, // Add this
+  telegramUsername: { type: String }, // Add this
 });
 const User = mongoose.model('User', userSchema);
+
+
+
 // Content Schema
 const contentSchema = new mongoose.Schema({
   title: { type: String, required: true },
@@ -111,6 +63,8 @@ const contentSchema = new mongoose.Schema({
   tags: [{ type: String }],
   createdAt: { type: Date, default: Date.now }
 });
+
+
 const Content = mongoose.model('Content', contentSchema);
 // PDF Collection Schema
 const pdfCollectionSchema = new mongoose.Schema({
@@ -264,14 +218,16 @@ const getEmbedding = async (text: string): Promise<number[]> => {
   return embedding;
 };
 
-// Telegram Reminder Bot
+
+// Telegram Content Management Bot
 class TelegramReminderBot {
   public bot: TelegramBot | null = null;
   public isActive = true;
+  private userSessions = new Map<string, any>(); // chatId -> session data
 
   constructor() {
     if (TELEGRAM_BOT_TOKEN) {
-      console.log(TELEGRAM_BOT_TOKEN)
+      console.log(TELEGRAM_BOT_TOKEN);
       this.startBot();
     }
   }
@@ -293,53 +249,597 @@ class TelegramReminderBot {
     // Start command
     this.bot.onText(/\/start/, async (msg: any) => {
       const chatId = msg.chat.id;
+      const username = msg.from?.username || msg.from?.first_name;
+      
       await this.sendMessage(chatId, 
-        '✨ Cosmic Mind Reminders\n\n' +
-        'I will send you reminders from your knowledge base.\n' +
-        'Set reminders in the web app and I\'ll notify you here.'
+        `✨ **Welcome to Cosmic Mind, ${username}!**\n\n` +
+        'I help you save and organize your content.\n\n' +
+        '📱 **Quick Start:**\n' +
+        '1. First, link your account: `/link YOUR_TOKEN`\n' +
+        '2. Then save content using `/addcontent`\n\n' +
+        '💡 **Try these commands:**\n' +
+        '• /addcontent - Save YouTube/Twitter links\n' +
+        '• /mycontent - View your saved content\n' +
+        '• /help - See all commands'
       );
     });
 
     // Help command
-    this.bot.onText(/\/help/, async (msg : any) => {
+    this.bot.onText(/\/help/, async (msg: any) => {
       const chatId = msg.chat.id;
       await this.sendMessage(chatId,
-        '📱 **Commands:**\n' +
-        '/start - Start the bot\n' +
-        '/help - Show this help\n\n' +
-        '💡 **To set reminders:**\n' +
-        '1. Go to web app\n' +
-        '2. Set reminders\n' +
-        '3. Get notifications here'
+        '📱 **Available Commands:**\n\n' +
+        '🔗 **Account:**\n' +
+        '/link <token> - Link your account\n' +
+        '/status - Check bot status\n\n' +
+        '🎵 **Content Management:**\n' +
+        '/addcontent - Save content (with title & tags)\n' +
+        '/mycontent - View your saved items\n' +
+        '/quickadd <link> - Quick save (just link)\n\n' +
+        '⏰ **Reminders:**\n' +
+        '/reminders - View reminders\n' +
+        '/setreminder - Create reminder\n\n' +
+        '💡 **Pro Tip:**\n' +
+        'Just send any YouTube/Twitter link to start saving!'
       );
     });
 
-    // Quick reminder
-    this.bot.onText(/\/remind (.+)/, async (msg:any, match:any) => {
+    // Link account
+    this.bot.onText(/\/link (.+)/, async (msg: any, match: any) => {
       const chatId = msg.chat.id;
-      if (match) {
-        await this.sendMessage(chatId, 
-          `✅ I'll remind you: "${match[1]}"\n\n` +
-          'For now, please use the web app to set timed reminders.'
-        );
+      const token = match[1];
+      
+      try {
+        const response = await fetch(`http://localhost:${PORT}/api/v1/telegram/link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            telegramChatId: chatId.toString(),
+            telegramUsername: msg.from.username,
+            token: token
+          })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          await this.sendMessage(chatId,
+            `✅ **Welcome ${data.username}!**\n\n` +
+            'Your Cosmic Mind account is now linked with Telegram!\n\n' +
+            '🎯 **Now you can:**\n' +
+            '• Save YouTube/Twitter links with `/addcontent`\n' +
+            '• View saved content with `/mycontent`\n' +
+            '• Set reminders for important content\n\n' +
+            'Try it now! Send a YouTube or Twitter link.'
+          );
+        } else {
+          await this.sendMessage(chatId,
+            '❌ **Linking Failed**\n\n' +
+            `Error: ${data.message}\n\n` +
+            'Get your token from Cosmic Mind web app → Profile section.'
+          );
+        }
+      } catch (error) {
+        await this.sendMessage(chatId, '❌ Server connection failed.');
       }
+    });
+
+    // ============ ENHANCED CONTENT ADDITION ============
+    
+    // Add content with full form (like web interface)
+    this.bot.onText(/\/addcontent/, async (msg: any) => {
+      const chatId = msg.chat.id;
+      const sessionId = `${chatId}`;
+      
+      // Start new session
+      this.userSessions.set(sessionId, {
+        step: 'type',
+        data: { tags: [] }
+      });
+
+      const options = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '🎵 YouTube Video', callback_data: 'type_youtube' },
+              { text: '🐦 Tweet/X Post', callback_data: 'type_twitter' }
+            ],
+            [
+              { text: '❌ Cancel', callback_data: 'cancel' }
+            ]
+          ]
+        }
+      };
+
+      await this.bot!.sendMessage(chatId,
+        '📝 **Let\'s save some content!**\n\n' +
+        'This is just like the web app. We\'ll collect:\n\n' +
+        '1️⃣ **Type** (YouTube/Twitter)\n' +
+        '2️⃣ **Title** (Descriptive name)\n' +
+        '3️⃣ **URL** (The link)\n' +
+        '4️⃣ **Tags** (Optional, comma-separated)\n\n' +
+        '**Step 1: Choose content type:**',
+        options
+      );
+    });
+
+    // Quick add command (just link)
+    this.bot.onText(/\/quickadd (.+)/, async (msg: any, match: any) => {
+      const chatId = msg.chat.id;
+      const link = match[1].trim();
+      
+      // Detect type from URL
+      let type = '';
+      if (link.includes('youtube.com') || link.includes('youtu.be')) {
+        type = 'youtube';
+      } else if (link.includes('twitter.com') || link.includes('x.com')) {
+        type = 'twitter';
+      }
+      
+      if (!type) {
+        await this.sendMessage(chatId, '❌ Please provide a YouTube or Twitter link.');
+        return;
+      }
+      
+      await this.quickSaveContent(chatId, link, type);
+    });
+
+    // Handle callback queries
+    this.bot.on('callback_query', async (callbackQuery: any) => {
+      const message = callbackQuery.message;
+      const chatId = message.chat.id;
+      const data = callbackQuery.data;
+      const sessionId = `${chatId}`;
+      const session = this.userSessions.get(sessionId);
+
+      // Remove inline keyboard
+      await this.bot!.editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        { chat_id: chatId, message_id: message.message_id }
+      );
+
+      if (data === 'cancel') {
+        this.userSessions.delete(sessionId);
+        await this.bot!.sendMessage(chatId, '❌ Content addition cancelled.');
+        return;
+      }
+
+      if (data.startsWith('type_')) {
+        const type = data.replace('type_', '');
+        
+        if (session) {
+          session.step = 'title';
+          session.data.type = type;
+          this.userSessions.set(sessionId, session);
+
+          const emoji = type === 'youtube' ? '🎵' : '🐦';
+          await this.bot!.sendMessage(chatId,
+            `${emoji} **Step 2: Enter Title**\n\n` +
+            `Please send me the title for this ${type} content.\n\n` +
+            '**Examples:**\n' +
+            '• "React Hooks Tutorial"\n' +
+            '• "SpaceX Latest Announcement"\n' +
+            '• "AI Conference Highlights"\n\n' +
+            '📝 *Tip: Make it descriptive for easy searching.*',
+            { parse_mode: 'Markdown' }
+          );
+        }
+      }
+    });
+
+    // Handle step-by-step messages
+    this.bot.on('message', async (msg: any) => {
+      if (!msg.text || msg.text.startsWith('/')) return;
+      
+      const chatId = msg.chat.id;
+      const sessionId = `${chatId}`;
+      const session = this.userSessions.get(sessionId);
+      
+      if (!session) {
+        // Check if it's a direct link
+        await this.handleDirectLink(msg);
+        return;
+      }
+
+      const userInput = msg.text.trim();
+      
+      switch (session.step) {
+        case 'title':
+          session.data.title = userInput;
+          session.step = 'link';
+          this.userSessions.set(sessionId, session);
+          
+          const contentType  = session.data.type;
+          console.log( session.data.title)
+          const linkExample = contentType   === 'youtube' 
+            ? 'https://youtube.com/watch?v=example123'
+            : 'https://x.com/username/status/123456';
+          
+          await this.bot!.sendMessage(chatId,
+            `✅ **Title saved:** "${userInput}"\n\n` +
+            `🔗 **Step 3: Enter ${contentType  === 'youtube' ? 'YouTube' : 'Twitter/X'} URL**\n\n` +
+            `Please send me the full link.\n\n` +
+            `**Example:**\n` +
+            `\`${linkExample}\`\n\n` +
+            '🌐 *Make sure the link starts with https://*',
+            { parse_mode: 'Markdown' }
+          );
+          break;
+          
+        case 'link':
+          // Validate URL
+          console.log(userInput)
+          if (!this.isValidUrl(userInput)) {
+            await this.bot!.sendMessage(chatId,
+              '❌ **Invalid URL Format**\n\n' +
+              'Please enter a valid URL starting with http:// or https://\n\n' +
+              'Example: `https://youtube.com/watch?v=example`'
+            );
+            return;
+          }
+          
+          // Validate URL type
+          const type = session.data.type;
+          if ((type === 'youtube' && !userInput.includes('youtube.com') && !userInput.includes('youtu.be')) ||
+              (type === 'twitter' && !userInput.includes('twitter.com') && !userInput.includes('x.com'))) {
+            await this.bot!.sendMessage(chatId,
+              `❌ **Wrong URL Type**\n\n` +
+              `This doesn't look like a ${type} link.\n` +
+              `Please enter a valid ${type} URL.`
+            );
+            return;
+          }
+          
+          session.data.link = userInput;
+          session.step = 'tags';
+          this.userSessions.set(sessionId, session);
+          
+          await this.bot!.sendMessage(chatId,
+            '✅ **URL saved!**\n\n' +
+            '🏷️ **Step 4: Add Tags (Optional)**\n\n' +
+            'Enter tags separated by commas:\n\n' +
+            '**Examples:**\n' +
+            '• `programming, tutorial, react`\n' +
+            '• `spacex, news, technology`\n' +
+            '• `ai, conference, highlights`\n\n' +
+            '💡 *Tags help organize and find content later.*\n\n' +
+            '**Or use these commands:**\n' +
+            '• `/skip` - Continue without tags\n' +
+            '• `/cancel` - Cancel everything',
+            { parse_mode: 'Markdown' }
+          );
+          break;
+          
+        case 'tags':
+          if (userInput.toLowerCase() === '/skip') {
+            session.data.tags = [];
+          } else {
+            // Parse tags
+            session.data.tags = userInput.split(',')
+              .map((tag: string) => tag.trim())
+              .filter((tag: string) => tag.length > 0);
+          }
+          
+          // Save the content
+          await this.saveContentFromTelegram(chatId, session.data);
+          
+          // Clear session
+          this.userSessions.delete(sessionId);
+          break;
+      }
+    });
+
+    // Skip tags command
+    this.bot.onText(/\/skip/, async (msg: any) => {
+      const chatId = msg.chat.id;
+      const sessionId = `${chatId}`;
+      const session = this.userSessions.get(sessionId);
+      
+      if (session && session.step === 'tags') {
+        session.data.tags = [];
+        await this.saveContentFromTelegram(chatId, session.data);
+        this.userSessions.delete(sessionId);
+      }
+    });
+
+    // Cancel command
+    this.bot.onText(/\/cancel/, async (msg: any) => {
+      const chatId = msg.chat.id;
+      const sessionId = `${chatId}`;
+      
+      if (this.userSessions.has(sessionId)) {
+        this.userSessions.delete(sessionId);
+        await this.bot!.sendMessage(chatId, '❌ Content addition cancelled.');
+      }
+    });
+
+    // View user's content
+    this.bot.onText(/\/mycontent/, async (msg: any) => {
+      const chatId = msg.chat.id;
+      
+      try {
+        await this.bot!.sendChatAction(chatId, 'typing');
+        
+        const response = await fetch(`http://localhost:${PORT}/api/v1/telegram/content/list`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            telegramChatId: chatId.toString(),
+            limit: 5 
+          })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          if (data.content.length === 0) {
+            await this.sendMessage(chatId,
+              '📭 **No Content Yet**\n\n' +
+              'You haven\'t saved any content.\n\n' +
+              'Try:\n' +
+              '• `/addcontent` - Add with form\n' +
+              '• Send a YouTube/Twitter link directly\n' +
+              '• `/quickadd <link>` - Quick save'
+            );
+            return;
+          }
+
+          let message = `📚 **Your Recent Content (${data.count} total)**\n\n`;
+          
+          data.content.forEach((item: any, index: number) => {
+            const emoji = item.type === 'youtube' ? '🎵' : '🐦';
+            const date = new Date(item.createdAt).toLocaleDateString();
+            const tags = item.tags?.length > 0 ? `\n   Tags: ${item.tags.join(', ')}` : '';
+            
+            message += `${index + 1}. ${emoji} **${item.title}**\n`;
+            message += `   📅 ${date}${tags}\n\n`;
+          });
+
+          await this.sendMessage(chatId, message);
+        } else {
+          await this.sendMessage(chatId,
+            '❌ **Account Not Linked**\n\n' +
+            'Please link your account first:\n' +
+            '1. Get token from web app → Profile\n' +
+            '2. Use: `/link YOUR_TOKEN`'
+          );
+        }
+      } catch (error) {
+        await this.sendMessage(chatId, '❌ Error fetching content. Please try again.');
+      }
+    });
+
+    // Status command
+    this.bot.onText(/\/status/, async (msg: any) => {
+      const chatId = msg.chat.id;
+      
+      await this.sendMessage(chatId,
+        '📊 **Bot Status**\n\n' +
+        '🤖 Bot: ✅ Online\n' +
+        '✨ Features: Content Saving, Reminders\n\n' +
+        '🔗 **Get Started:**\n' +
+        '1. Link account: `/link <token>`\n' +
+        '2. Save content: `/addcontent`\n\n' +
+        '💡 **Quick Save:**\n' +
+        'Just send any YouTube/Twitter link!'
+      );
     });
   }
 
-  // Send message to user
-  async sendMessage(chatId: string | number, message: string) {
-    if (!this.bot || !this.isActive) return false;
+  // ============ HELPER METHODS ============
+
+  // Handle direct link messages
+  private async handleDirectLink(msg: any) {
+    const chatId = msg.chat.id;
+    const text = msg.text.trim();
     
+    if (this.isValidUrl(text)) {
+      let type = '';
+      
+      if (text.includes('youtube.com') || text.includes('youtu.be')) {
+        type = 'youtube';
+      } else if (text.includes('twitter.com') || text.includes('x.com')) {
+        type = 'twitter';
+      }
+      
+      if (type) {
+        // Start session for direct link
+        const sessionId = `${chatId}`;
+        this.userSessions.set(sessionId, {
+          step: 'title',
+          data: {
+            type: type,
+            link: text,
+            tags: []
+          }
+        });
+        
+        const emoji = type === 'youtube' ? '🎵' : '🐦';
+        await this.bot!.sendMessage(chatId,
+          `${emoji} **I found a ${type} link!**\n\n` +
+          'Let\'s save it properly:\n\n' +
+          '📝 **Please provide a title:**\n\n' +
+          'Examples:\n' +
+          '• "React Tutorial"\n' +
+          '• "Important Announcement"\n' +
+          '• "Conference Talk"\n\n' +
+          'Or use `/cancel` to abort.',
+          { parse_mode: 'Markdown' }
+        );
+      }
+    }
+  }
+
+  // Quick save (just link with auto-generated title)
+  private async quickSaveContent(chatId: number, link: string, type: string) {
     try {
-      await this.bot.sendMessage(chatId, message);
-      return true;
+      await this.bot!.sendChatAction(chatId, 'typing');
+      
+      // Auto-generate title
+      let title = '';
+      if (type === 'youtube') {
+        const videoId = this.extractVideoId(link);
+        title = `YouTube: ${videoId || 'Video'}`;
+      } else {
+        const tweetId = this.extractTweetId(link);
+        title = `Tweet: ${tweetId || 'Post'}`;
+      }
+      
+      const response = await fetch(`http://localhost:${PORT}/api/v1/telegram/content`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telegramChatId: chatId.toString(),
+          link: link,
+          type: type,
+          title: title,
+          tags: ['telegram', 'quick', type]
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const emoji = type === 'youtube' ? '🎵' : '🐦';
+        await this.sendMessage(chatId,
+          `${emoji} **Quick Save Complete!**\n\n` +
+          `**Title:** ${data.content.title}\n` +
+          `**Type:** ${data.content.type}\n\n` +
+          '✅ Added to your Cosmic Mind library.'
+        );
+      } else {
+        await this.sendMessage(chatId,
+          '❌ **Failed to Save**\n\n' +
+          `Error: ${data.message}\n\n` +
+          'Make sure your account is linked (`/link <token>`).'
+        );
+      }
     } catch (error) {
-      console.error('Failed to send Telegram message:', error);
+      await this.sendMessage(chatId, '❌ Connection error. Please try again.');
+    }
+  }
+
+ 
+  // Save content with full form data - USE PLAIN TEXT
+private async saveContentFromTelegram(chatId: number, contentData: any) {
+  try {
+    await this.bot!.sendChatAction(chatId, 'typing');
+    
+    console.log('📤 Saving content via API:', contentData);
+    
+    const response = await fetch(`http://localhost:${PORT}/api/v1/telegram/content`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telegramChatId: chatId.toString(),
+        link: contentData.link,
+        type: contentData.type,
+        title: contentData.title,
+        tags: contentData.tags
+      })
+    });
+
+    const data = await response.json();
+    console.log('API Response:', data);
+
+    if (data.success) {
+      const emoji = contentData.type === 'youtube' ? '🎵' : '🐦';
+      let tagsText = '';
+      if (contentData.tags && contentData.tags.length > 0) {
+        tagsText = `\nTags: ${contentData.tags.join(', ')}`;
+      }
+      
+      // PLAIN TEXT MESSAGE - NO MARKDOWN
+      const message = `${emoji} ✅ Content Saved Successfully!\n\n` +
+                     `Title: ${data.content.title}\n` +
+                     `Type: ${data.content.type}\n` +
+                     `URL: ${data.content.link}${tagsText}\n\n` +
+                     `✨ This content is now available in your Cosmic Mind library!`;
+      
+      // Send without parse_mode
+      await this.bot!.sendMessage(chatId, message);
+      
+      // Show quick actions
+      const quickActions = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📚 View My Content', callback_data: 'view_my_content' }],
+            [{ text: '➕ Add More', callback_data: 'add_more_content' }]
+          ]
+        }
+      };
+      
+      await this.bot!.sendMessage(chatId, 'What would you like to do next?', quickActions);
+    } else {
+      // Plain text error message
+      await this.bot!.sendMessage(chatId,
+        `❌ Failed to Save Content\n\n` +
+        `Error: ${data.message}\n\n` +
+        `Make sure:\n` +
+        `1. Your account is linked (/link <token>)\n` +
+        `2. The URL is valid\n` +
+        `3. Try again with /addcontent`
+      );
+    }
+  } catch (error) {
+    console.error('Save content error:', error);
+    await this.bot!.sendMessage(chatId,
+      '❌ Connection Error\n\n' +
+      'Cannot connect to server. Please try again later.'
+    );
+  }
+}
+
+
+  // Utility methods
+  private isValidUrl(url: string): boolean {
+    try {
+      new URL(url);
+      return true;
+    } catch {
       return false;
     }
   }
 
-  // Send notification to all users
+  private extractVideoId(url: string): string {
+    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s?]+)/);
+    return match ? match[1]!.substring(0, 10) : 'video';
+  }
+
+  private extractTweetId(url: string): string {
+    const match = url.match(/status\/(\d+)/);
+    return match ? match[1]! : 'tweet';
+  }
+
+  // Send message helper
+  async sendMessage(chatId: string | number, message: string, options: any = {}) {
+    if (!this.bot || !this.isActive) return false;
+    
+    try {
+      if (!options.parse_mode) {
+        options.parse_mode = 'Markdown';
+      }
+      
+      await this.bot.sendMessage(chatId, message, options);
+      return true;
+    } catch (error: any) {
+      console.error('Failed to send Telegram message:', error.message);
+      
+      // Try without Markdown
+      if (error.message.includes('Markdown')) {
+        try {
+          delete options.parse_mode;
+          await this.bot.sendMessage(chatId, message.replace(/[\*_`]/g, ''), options);
+          return true;
+        } catch (retryError) {
+          console.error('Retry also failed:', retryError);
+        }
+      }
+      
+      return false;
+    }
+  }
+
   async sendNotification(message: string) {
     if (!this.bot || !this.isActive || TELEGRAM_CHAT_IDS.length === 0) return;
     
@@ -352,6 +852,21 @@ class TelegramReminderBot {
     }
   }
 }
+
+//   // Send notification to all users
+//   async sendNotification(message: string) {
+//     if (!this.bot || !this.isActive || TELEGRAM_CHAT_IDS.length === 0) return;
+    
+//     for (const chatId of TELEGRAM_CHAT_IDS) {
+//       try {
+//         await this.sendMessage(chatId, `🔔 ${message}`);
+//       } catch (error) {
+//         console.error(`Failed to send to ${chatId}:`, error);
+//       }
+//     }
+//   }
+// }
+
 
 // Create bot instance
 const telegramBot = new TelegramReminderBot();
@@ -1212,6 +1727,248 @@ app.put('/api/v1/reminders/:id/toggle', authMiddleware, async (req, res) => {
   }
 });
 
+// ============ TELEGRAM INTEGRATION ENDPOINTS ===========
+
+// Link Telegram account with Cosmic Mind account
+app.post('/api/v1/telegram/link', async (req, res) => {
+  try {
+    const { telegramChatId, telegramUsername, token } = req.body;
+
+    if (!telegramChatId || !token) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Telegram chat ID and token are required' 
+      });
+    }
+
+    // Verify the token
+    const decoded = verifyToken(token);
+    if (!decoded) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid token' 
+      });
+    }
+
+    // Find user
+    const user = await User.findById(decoded.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Update user with Telegram info
+    user.telegramChatId = telegramChatId;
+    user.telegramUsername = telegramUsername;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Telegram account linked successfully',
+      username: user.username,
+      telegramChatId: user.telegramChatId
+    });
+
+  } catch (error) {
+    console.error('Telegram link error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to link Telegram account' 
+    });
+  }
+});
+
+// Add content from Telegram (ENHANCED VERSION - REMOVE THE OTHER ONE!)
+app.post('/api/v1/telegram/content', async (req, res) => {
+  try {
+    const { 
+      telegramChatId, 
+      link, 
+      type, 
+      title, 
+      tags = [] 
+    } = req.body;
+
+    console.log('📥 Telegram content request:', { telegramChatId, type, title });
+
+    if (!telegramChatId || !link || !type || !title) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'All fields are required: chat ID, link, type, and title' 
+      });
+    }
+
+    // Validate content type
+    if (!['youtube', 'twitter'].includes(type)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Type must be youtube or twitter' 
+      });
+    }
+
+    // Find user by Telegram chat ID
+    const user = await User.findOne({ telegramChatId });
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Please link your account first. Use /link command.' 
+      });
+    }
+
+    // Create content item
+    const content = new Content({
+      title: title,
+      link: link,
+      type: type,
+      userId: user._id,
+      tags: ['telegram', type, ...tags.filter((tag: string) => tag.trim())],
+      createdAt: new Date()
+    });
+
+    await content.save();
+
+    console.log('✅ Content saved to DB:', content._id);
+
+    // Send simple notification WITHOUT MARKDOWN to avoid errors
+    if (telegramBot && telegramBot.bot) {
+      try {
+        const emoji = type === 'youtube' ? '🎵' : '🐦';
+        const tagsText = tags.length > 0 ? `\nTags: ${tags.join(', ')}` : '';
+        
+        // PLAIN TEXT MESSAGE - NO MARKDOWN
+        const message = `${emoji} Content Saved Successfully!\n\n` +
+                       `Title: ${title}\n` +
+                       `Type: ${type}\n` +
+                       `URL: ${link}${tagsText}\n\n` +
+                       `✅ Added to your Cosmic Mind library!`;
+        
+        await telegramBot.bot.sendMessage(telegramChatId, message);
+        console.log('📤 Notification sent to Telegram');
+      } catch (telegramError) {
+        console.error('Failed to send Telegram notification:', telegramError);
+        // Don't fail the API call if Telegram notification fails
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Content saved successfully',
+      content: {
+        id: content._id,
+        title: content.title,
+        link: content.link,
+        type: content.type,
+        tags: content.tags,
+        userId: content.userId,
+        createdAt: content.createdAt
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Telegram content error:', error);
+    
+    // Handle duplicate content
+    if (error.code === 11000 || error.message.includes('duplicate')) {
+      return res.status(409).json({ 
+        success: false, 
+        message: 'This content already exists in your library' 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      message: `Failed to save content: ${error.message}` 
+    });
+  }
+});
+
+// Get user's content for Telegram
+app.post('/api/v1/telegram/content/list', async (req, res) => {
+  try {
+    const { telegramChatId, limit = 10 } = req.body;
+
+    if (!telegramChatId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Telegram chat ID is required' 
+      });
+    }
+
+    // Find user by Telegram chat ID
+    const user = await User.findOne({ telegramChatId });
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Telegram account not linked' 
+      });
+    }
+
+    // Get user's content
+    const content = await Content.find({ userId: user._id })
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .select('title link type tags createdAt');
+
+    res.json({
+      success: true,
+      content: content,
+      count: content.length,
+      username: user.username
+    });
+
+  } catch (error) {
+    console.error('Telegram content list error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch content' 
+    });
+  }
+});
+
+// Get user's content for Telegram
+app.post('/api/v1/telegram/content/list', async (req, res) => {
+  try {
+    const { telegramChatId, limit = 10 } = req.body;
+
+    if (!telegramChatId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Telegram chat ID is required' 
+      });
+    }
+
+    // Find user by Telegram chat ID
+    const user = await User.findOne({ telegramChatId });
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Telegram account not linked' 
+      });
+    }
+
+    // Get user's content
+    const content = await Content.find({ userId: user._id })
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .select('title link type tags createdAt');
+
+    res.json({
+      success: true,
+      content: content,
+      count: content.length,
+      username: user.username
+    });
+
+  } catch (error) {
+    console.error('Telegram content list error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch content' 
+    });
+  }
+});
 
 function scheduleReminder(reminder: any) {
   const reminderTime = new Date(reminder.reminderTime);
@@ -1271,7 +2028,6 @@ function scheduleReminder(reminder: any) {
 }
 
 
-
 // 🏥 HEALTH CHECK
 app.get('/api/v1/health', async (req, res) => {
   try {
@@ -1311,3 +2067,401 @@ app.listen(PORT, () => {
 
 // Export for testing
 export default app;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// git commit -m " add telegram :error: [polling_error] {"code":"EFATAL","message":"EFATAL: Error: getaddrinfo ENOTFOUND api.telegram.org"}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// The scheduleReminder function has some issues. It's not handling repeating reminders and has timezone problems. Here's the corrected version with India timezone (IST) support:
+
+// Corrected scheduleReminder Function:
+// typescript
+// function scheduleReminder(reminder: any) {
+//   try {
+//     // Convert stored UTC time to India time (IST = UTC+5:30)
+//     const reminderTimeUTC = new Date(reminder.reminderTime);
+    
+//     // IMPORTANT: MongoDB stores in UTC, but we want to schedule in IST
+//     // Add 5 hours 30 minutes to convert UTC to IST
+//     const reminderTimeIST = new Date(reminderTimeUTC.getTime() + (5.5 * 60 * 60 * 1000));
+    
+//     const now = new Date();
+    
+//     console.log(`⏰ Scheduling: "${reminder.title}"`);
+//     console.log(`   UTC Time: ${reminderTimeUTC.toISOString()}`);
+//     console.log(`   IST Time: ${reminderTimeIST.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+//     console.log(`   Current Time: ${now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+//     console.log(`   Repeat: ${reminder.repeat}`);
+//     console.log(`   Time difference: ${Math.round((reminderTimeIST.getTime() - now.getTime()) / 1000)} seconds`);
+    
+//     // If time is in the past for "once" reminders, skip
+//     if (reminderTimeIST <= now && reminder.repeat === 'once') {
+//       console.log(`⚠️ Skipping one-time reminder in the past`);
+//       return;
+//     }
+    
+//     // Handle repeating reminders
+//     let rule: schedule.RecurrenceRule | Date;
+    
+//     if (reminder.repeat === 'once') {
+//       // One-time reminder
+//       rule = reminderTimeIST;
+//     } else {
+//       // Create recurrence rule based on repeat setting
+//       rule = new schedule.RecurrenceRule();
+      
+//       // Extract time components from the reminder time
+//       rule.hour = reminderTimeIST.getHours();
+//       rule.minute = reminderTimeIST.getMinutes();
+//       rule.second = reminderTimeIST.getSeconds();
+//       rule.tz = 'Asia/Kolkata'; // Set timezone to IST
+      
+//       switch (reminder.repeat) {
+//         case 'daily':
+//           // Daily at the same time
+//           break;
+          
+//         case 'weekly':
+//           // Weekly on the same day
+//           rule.dayOfWeek = reminderTimeIST.getDay();
+//           break;
+          
+//         case 'monthly':
+//           // Monthly on the same date
+//           rule.date = reminderTimeIST.getDate();
+//           break;
+          
+//         default:
+//           // Default to one-time
+//           rule = reminderTimeIST;
+//       }
+//     }
+    
+//     // Schedule the job
+//     const job = schedule.scheduleJob(`reminder_${reminder._id}`, rule, async function() {
+//       console.log(`🔔 REMINDER EXECUTING: ${reminder.title} (${reminder.repeat})`);
+      
+//       if (telegramBot && telegramBot.bot) {
+//         try {
+//           const currentIST = new Date().toLocaleString('en-IN', { 
+//             timeZone: 'Asia/Kolkata',
+//             hour12: true 
+//           });
+          
+//           const message = `🔔 **Reminder:** ${reminder.title}\n` +
+//                          `${reminder.description || ''}\n\n` +
+//                          `⏰ Time: ${currentIST} (IST)\n` +
+//                          `🔄 Repeat: ${reminder.repeat}`;
+          
+//           // Send to the chat ID from the reminder
+//           const chatId = reminder.telegramChatId || '7377850240';
+//           await telegramBot.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+//           console.log(`✅ Reminder sent to Telegram (${chatId}): ${reminder.title}`);
+          
+//           // If it's a one-time reminder, mark as inactive after sending
+//           if (reminder.repeat === 'once') {
+//             await Reminder.findByIdAndUpdate(reminder._id, { isActive: false });
+//             console.log(`📝 One-time reminder marked as inactive`);
+//           }
+          
+//         } catch (error: any) {
+//           console.error(`❌ Telegram error:`, error.message);
+          
+//           // Try again after 5 seconds
+//           setTimeout(async () => {
+//             try {
+//               await telegramBot!.bot!.sendMessage('7377850240', 
+//                 `🔄 Retry: ${reminder.title}\n${error.message.substring(0, 100)}`,
+//                 { parse_mode: 'Markdown' }
+//               );
+//             } catch (retryError) {
+//               console.error('❌ Retry also failed');
+//             }
+//           }, 5000);
+//         }
+//       } else {
+//         console.log('❌ Telegram bot not available');
+//       }
+//     });
+    
+//     if (job) {
+//       console.log(`✅ Successfully scheduled "${reminder.title}" for ${reminder.repeat} at ${reminderTimeIST.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`);
+      
+//       // Store job reference for cancellation if needed
+//       reminderScheduledJobs[reminder._id.toString()] = job;
+//     } else {
+//       console.error(`❌ FAILED to schedule: "${reminder.title}"`);
+//     }
+    
+//   } catch (error) {
+//     console.error(`❌ Error scheduling reminder "${reminder.title}":`, error);
+//   }
+// }
+
+// // Add this at the top of your file (after imports)
+// const reminderScheduledJobs: { [key: string]: schedule.Job } = {};
+
+// // Add function to cancel scheduled reminder
+// function cancelScheduledReminder(reminderId: string) {
+//   try {
+//     const job = reminderScheduledJobs[reminderId];
+//     if (job) {
+//       job.cancel();
+//       delete reminderScheduledJobs[reminderId];
+//       console.log(`🗑️ Cancelled scheduled job for reminder: ${reminderId}`);
+//       return true;
+//     }
+//   } catch (error) {
+//     console.error(`Error cancelling reminder ${reminderId}:`, error);
+//   }
+//   return false;
+// }
+// Also Update Your Reminder Creation API for IST:
+// typescript
+// app.post('/api/v1/reminders', authMiddleware, async (req, res) => {
+//   try {
+//     const userId = req.userId!;
+//     const { title, description, reminderTime, repeat, telegramChatId } = req.body;
+
+//     if (!title || !reminderTime) {
+//       return res.status(400).json({ message: 'Title and reminder time are required' });
+//     }
+
+//     // IMPORTANT: Convert incoming IST time to UTC for storage
+//     // Assuming reminderTime is in ISO format like "2024-01-15T14:30:00" (which will be treated as IST)
+//     const reminderTimeIST = new Date(reminderTime);
+    
+//     // Convert IST to UTC (subtract 5:30 hours)
+//     const reminderTimeUTC = new Date(reminderTimeIST.getTime() - (5.5 * 60 * 60 * 1000));
+
+//     const reminder = new Reminder({
+//       userId,
+//       title,
+//       description: description || '',
+//       reminderTime: reminderTimeUTC, // Store in UTC
+//       repeat: repeat || 'once',
+//       telegramChatId: telegramChatId || '',
+//       isActive: true
+//     });
+
+//     await reminder.save();
+
+//     // Schedule the reminder
+//     scheduleReminder(reminder);
+
+//     res.status(201).json({
+//       success: true,
+//       message: 'Reminder created successfully',
+//       reminder: {
+//         id: reminder._id,
+//         title: reminder.title,
+//         reminderTime: reminderTimeIST, // Return IST time to user
+//         repeat: reminder.repeat,
+//         isActive: reminder.isActive
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('Create reminder error:', error);
+//     res.status(500).json({ message: 'Failed to create reminder' });
+//   }
+// });
+// Testing from Postman with IST Time:
+// POST Request:
+// text
+// POST http://localhost:3001/api/v1/reminders
+// Content-Type: application/json
+// Authorization: Bearer YOUR_JWT_TOKEN
+// Body (Example for 2:30 PM IST today):
+// json
+// {
+//   "title": "Meeting with Team",
+//   "description": "Daily standup meeting",
+//   "reminderTime": "2024-01-15T14:30:00", // This is 2:30 PM IST
+//   "repeat": "daily",
+//   "telegramChatId": "7377850240"
+// }
+// Alternative: For tomorrow 9:00 AM IST:
+// json
+// {
+//   "title": "Morning Review",
+//   "reminderTime": "2024-01-16T09:00:00", // 9:00 AM IST
+//   "repeat": "weekly"
+// }
+// Key Fixes Made:
+// ✅ Timezone Handling:
+
+// Stores in UTC (database standard)
+
+// Schedules in IST (India time)
+
+// Converts properly between timezones
+
+// ✅ Repeating Reminders:
+
+// once: One-time only
+
+// daily: Every day at same time
+
+// weekly: Same day and time each week
+
+// monthly: Same date each month
+
+// ✅ Proper Logging:
+
+// Shows both UTC and IST times
+
+// Clear console output
+
+// ✅ Job Management:
+
+// Stores job references for cancellation
+
+// Uses unique job names
+
+// ✅ One-time reminder cleanup:
+
+// Marks as inactive after sending
+
+// To Test from Postman:
+// Create a reminder for 2 minutes from now in IST
+
+// Wait and check Telegram
+
+// Create daily/weekly repeating reminders
+
+// Check server logs for time conversions
+
