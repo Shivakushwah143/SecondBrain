@@ -122,18 +122,18 @@ const AuthForm: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-linear-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
       <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
         
         {/* Left Column - Brand & Features */}
         <div className="space-y-8">
           {/* Brand */}
           <div className="flex items-center space-x-4">
-            <div className="w-16 h-16 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-xl">
+            <div className="w-16 h-16 bg-linear-to-br from-indigo-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-xl">
               <FiDatabase className="w-8 h-8 text-white" />
             </div>
             <div>
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              <h1 className="text-4xl font-bold bg-linear-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
                 Second Brain
               </h1>
               <p className="text-gray-600">Your Intelligent Knowledge Base</p>
@@ -160,7 +160,7 @@ const AuthForm: React.FC = () => {
             ].map((feature, idx) => (
               <div key={idx} className="bg-white/80 backdrop-blur-sm p-4 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-1">
                 <div className="flex items-center space-x-3">
-                  <div className="w-12 h-12 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl flex items-center justify-center">
+                  <div className="w-12 h-12 bg-linear-to-br from-indigo-100 to-purple-100 rounded-xl flex items-center justify-center">
                     <feature.icon className="w-6 h-6 text-indigo-600" />
                   </div>
                   <div>
@@ -257,7 +257,7 @@ const AuthForm: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-4 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-4 px-4 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <div className="flex items-center justify-center">
@@ -306,7 +306,7 @@ const AuthForm: React.FC = () => {
           </div>
 
           {/* Demo Credentials */}
-          <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+          <div className="mt-6 p-4 bg-linear-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
             <p className="text-sm text-blue-800 font-medium mb-2">💡 Demo Credentials</p>
             <p className="text-xs text-blue-600">
               Username: <span className="font-mono">demo</span> | Password: <span className="font-mono">demo123</span>
@@ -570,7 +570,7 @@ const Dashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-linear-to-br from-gray-50 to-white flex items-center justify-center">
         <div className="text-center">
           <div className="inline-block w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-6"></div>
           <p className="text-gray-700 font-medium text-lg">Loading your knowledge base...</p>
@@ -581,18 +581,18 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white">
+    <div className="min-h-screen bg-linear-to-br from-gray-50 to-white">
       {/* Header */}
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className=" mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+              <div className="w-10 h-10 bg-linear-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
                 <FiDatabase className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                <h1 className="text-xl font-bold bg-linear-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
                   Second Brain
                 </h1>
                 <p className="text-xs text-gray-500">Intelligent Knowledge Base</p>
@@ -613,7 +613,7 @@ const Dashboard: React.FC = () => {
                   onClick={() => setActiveTab(tab.id as any)}
                   className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center space-x-2 ${
                     activeTab === tab.id
-                      ? 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-700 border border-indigo-200'
+                      ? 'bg-linear-to-r from-indigo-50 to-purple-50 text-indigo-700 border border-indigo-200'
                       : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                   }`}
                 >
@@ -642,7 +642,7 @@ const Dashboard: React.FC = () => {
               </button>
               
               <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
                   {auth?.user?.username?.charAt(0).toUpperCase()}
                 </div>
                 <button
@@ -683,7 +683,7 @@ const Dashboard: React.FC = () => {
                     }}
                     className={`px-4 py-3 rounded-lg font-medium text-sm transition-all flex items-center space-x-3 ${
                       activeTab === tab.id
-                        ? 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-700'
+                        ? 'bg-linear-to-r from-indigo-50 to-purple-50 text-indigo-700'
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -697,9 +697,9 @@ const Dashboard: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className=" mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Welcome Banner */}
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-xl p-6 mb-8 text-white relative overflow-hidden">
+        <div className="bg-linear-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-xl p-6 mb-8 text-white relative overflow-hidden">
           <div className="relative z-10 flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-bold mb-2">Welcome back, {auth?.user?.username}! 👋</h2>
@@ -762,7 +762,7 @@ const Dashboard: React.FC = () => {
                     {stat.change} from last month
                   </p>
                 </div>
-                <div className={`w-14 h-14 bg-gradient-to-br ${stat.color} rounded-2xl flex items-center justify-center`}>
+                <div className={`w-14 h-14 bg-linear-to-br ${stat.color} rounded-2xl flex items-center justify-center`}>
                   <stat.icon className="w-7 h-7 text-white" />
                 </div>
               </div>
@@ -882,7 +882,7 @@ const Dashboard: React.FC = () => {
                       <button
                         type="submit"
                         disabled={uploadingPDF}
-                        className="w-full px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center justify-center shadow-md hover:shadow-lg"
+                        className="w-full px-6 py-3 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center justify-center shadow-md hover:shadow-lg"
                       >
                         {uploadingPDF ? (
                           <>
@@ -935,7 +935,7 @@ const Dashboard: React.FC = () => {
                             : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                         }`}
                       >
-                        <div className="w-10 h-10 bg-gradient-to-br from-red-100 to-red-200 rounded-lg flex items-center justify-center">
+                        <div className="w-10 h-10 bg-linear-to-br from-red-100 to-red-200 rounded-lg flex items-center justify-center">
                           <SiAdobeacrobatreader className="w-5 h-5 text-red-600" />
                         </div>
                         <div className="text-left flex-1">
@@ -990,7 +990,7 @@ const Dashboard: React.FC = () => {
                         <button
                           type="submit"
                           disabled={pdfChatLoading || !pdfQuery.trim()}
-                          className="absolute right-2 top-2 p-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="absolute right-2 top-2 p-2 bg-linear-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {pdfChatLoading ? (
                             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -1016,7 +1016,7 @@ const Dashboard: React.FC = () => {
                     <h2 className="text-lg font-semibold text-gray-900">AI Assistant</h2>
                     <p className="text-sm text-gray-600">Powered by Groq AI</p>
                   </div>
-                  <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center">
+                  <div className="w-10 h-10 bg-linear-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center">
                     <FiCpu className="w-5 h-5 text-white" />
                   </div>
                 </div>
@@ -1036,9 +1036,9 @@ const Dashboard: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                      <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-200">
+                      <div className="bg-linear-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-200">
                         <div className="flex items-start space-x-3">
-                          <div className="w-8 h-8 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <div className="w-8 h-8 bg-linear-to-br from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
                             <FiZap className="w-4 h-4 text-white" />
                           </div>
                           <div>
@@ -1062,7 +1062,7 @@ const Dashboard: React.FC = () => {
                           <button
                             type="submit"
                             disabled={aiLoading || !aiMessage.trim()}
-                            className="absolute right-2 top-2 p-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="absolute right-2 top-2 p-2 bg-linear-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {aiLoading ? (
                               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -1258,7 +1258,7 @@ const Dashboard: React.FC = () => {
                       >
                         <div className="flex items-start justify-between mb-3">
                           <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-red-100 to-red-200 rounded-lg flex items-center justify-center">
+                            <div className="w-10 h-10 bg-linear-to-br from-red-100 to-red-200 rounded-lg flex items-center justify-center">
                               <SiAdobeacrobatreader className="w-5 h-5 text-red-600" />
                             </div>
                             <div>
@@ -1293,7 +1293,7 @@ const Dashboard: React.FC = () => {
                         <div className="flex items-center justify-between">
                           <button
                             onClick={() => setSelectedCollection(collection._id)}
-                            className="px-3 py-1.5 text-sm font-medium bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all"
+                            className="px-3 py-1.5 text-sm font-medium bg-linear-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all"
                           >
                             Chat with AI
                           </button>
@@ -1477,7 +1477,7 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Tech Stack */}
-            <div className="bg-gradient-to-br from-gray-900 to-black rounded-2xl shadow-lg p-6 text-white">
+            <div className="bg-linear-to-br from-gray-900 to-black rounded-2xl shadow-lg p-6 text-white">
               <h3 className="font-semibold mb-4">Powered By</h3>
               <div className="grid grid-cols-3 gap-4">
                 <div className="text-center">
@@ -1523,11 +1523,11 @@ const Dashboard: React.FC = () => {
 
       {/* Footer */}
       <footer className="border-t border-gray-200 bg-white mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className=" mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center space-x-3 mb-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center">
+                <div className="w-10 h-10 bg-linear-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center">
                   <FiDatabase className="w-6 h-6 text-white" />
                 </div>
                 <div>
@@ -1622,7 +1622,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, shareLink, isS
             <button
               onClick={onToggleShare}
               className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors ${
-                isSharing ? 'bg-gradient-to-r from-indigo-500 to-purple-500' : 'bg-gray-300'
+                isSharing ? 'bg-linear-to-r from-indigo-500 to-purple-500' : 'bg-gray-300'
               }`}
             >
               <span
@@ -1651,7 +1651,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, shareLink, isS
                   />
                   <button
                     onClick={copyToClipboard}
-                    className="px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-medium rounded-xl hover:from-indigo-600 hover:to-purple-600 transition-colors flex items-center space-x-2"
+                    className="px-5 py-3 bg-linear-to-r from-indigo-500 to-purple-500 text-white font-medium rounded-xl hover:from-indigo-600 hover:to-purple-600 transition-colors flex items-center space-x-2"
                   >
                     {copied ? (
                       <>
@@ -1753,7 +1753,7 @@ const App: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-linear-to-br from-gray-50 to-white flex items-center justify-center">
         <div className="text-center">
           <div className="inline-block w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-6"></div>
           <p className="text-gray-700 font-medium text-lg">Loading Second Brain...</p>

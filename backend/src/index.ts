@@ -18,9 +18,9 @@ import Groq from 'groq-sdk';
 import TelegramBot from 'node-telegram-bot-api';
 import schedule from 'node-schedule';
 
-
 dotenv.config();
 
+const reminderScheduledJobs: { [key: string]: schedule.Job } = {};
 // Environment variables - REMOVED Gemini, ADDED Groq
 const JWT_SECRET = process.env.JWT_SECRET || 'cosmic-mind-secret-key';
 const PORT = process.env.PORT || 3001;
@@ -1606,6 +1606,8 @@ app.get('/api/v1/brain/:shareLink', async (req, res) => {
 // ============ REMINDER ENDPOINTS ============
 
 // Create a reminder
+
+
 app.post('/api/v1/reminders', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId!;
@@ -1615,11 +1617,18 @@ app.post('/api/v1/reminders', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Title and reminder time are required' });
     }
 
+    // IMPORTANT: Convert incoming IST time to UTC for storage
+    // Assuming reminderTime is in ISO format like "2024-01-15T14:30:00" (which will be treated as IST)
+    const reminderTimeIST = new Date(reminderTime);
+    
+    // Convert IST to UTC (subtract 5:30 hours)
+    const reminderTimeUTC = new Date(reminderTimeIST.getTime() - (5.5 * 60 * 60 * 1000));
+
     const reminder = new Reminder({
       userId,
       title,
       description: description || '',
-      reminderTime: new Date(reminderTime),
+      reminderTime: reminderTimeUTC, // Store in UTC
       repeat: repeat || 'once',
       telegramChatId: telegramChatId || '',
       isActive: true
@@ -1636,8 +1645,9 @@ app.post('/api/v1/reminders', authMiddleware, async (req, res) => {
       reminder: {
         id: reminder._id,
         title: reminder.title,
-        reminderTime: reminder.reminderTime,
-        repeat: reminder.repeat
+        reminderTime: reminderTimeIST, // Return IST time to user
+        repeat: reminder.repeat,
+        isActive: reminder.isActive
       }
     });
 
@@ -1646,6 +1656,8 @@ app.post('/api/v1/reminders', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Failed to create reminder' });
   }
 });
+
+
 
 // Get user's reminders
 app.get('/api/v1/reminders', authMiddleware, async (req, res) => {
@@ -1970,60 +1982,181 @@ app.post('/api/v1/telegram/content/list', async (req, res) => {
   }
 });
 
-function scheduleReminder(reminder: any) {
-  const reminderTime = new Date(reminder.reminderTime);
-  const now = new Date();
+// function scheduleReminder(reminder: any) {
+//   const reminderTime = new Date(reminder.reminderTime);
+//   const now = new Date();
   
-  console.log(`⏰ Scheduling: "${reminder.title}"`);
-  console.log(`   Scheduled for: ${reminderTime.toLocaleString()}`);
-  console.log(`   Current time: ${now.toLocaleString()}`);
-  console.log(`   Time difference: ${Math.round((reminderTime.getTime() - now.getTime()) / 1000)} seconds`);
+//   console.log(`⏰ Scheduling: "${reminder.title}"`);
+//   console.log(`   Scheduled for: ${reminderTime.toLocaleString()}`);
+//   console.log(`   Current time: ${now.toLocaleString()}`);
+//   console.log(`   Time difference: ${Math.round((reminderTime.getTime() - now.getTime()) / 1000)} seconds`);
   
-  // If time is in the past, skip scheduling
-  if (reminderTime <= now) {
-    console.log(`⚠️ Skipping: Reminder time is in the past`);
-    return;
-  }
+//   // If time is in the past, skip scheduling
+//   if (reminderTime <= now) {
+//     console.log(`⚠️ Skipping: Reminder time is in the past`);
+//     return;
+//   }
   
-  // Schedule the job
-  const job = schedule.scheduleJob(reminderTime, async function() {
-    console.log(`🔔 REMINDER EXECUTING: ${reminder.title}`);
+//   // Schedule the job
+//   const job = schedule.scheduleJob(reminderTime, async function() {
+//     console.log(`🔔 REMINDER EXECUTING: ${reminder.title}`);
     
-    if (telegramBot && telegramBot.bot) {
-      try {
-        const message = `🔔 **Reminder:** ${reminder.title}\n` +
-                       `${reminder.description || ''}\n\n` +
-                       `⏰ Time: ${reminderTime.toLocaleString()}`;
+//     if (telegramBot && telegramBot.bot) {
+//       try {
+//         const message = `🔔 **Reminder:** ${reminder.title}\n` +
+//                        `${reminder.description || ''}\n\n` +
+//                        `⏰ Time: ${reminderTime.toLocaleString()}`;
         
-        // Send to the chat ID from the reminder
-        const chatId = reminder.telegramChatId || '7377850240';
-        await telegramBot.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-        console.log(`✅ Reminder sent to Telegram (${chatId}): ${reminder.title}`);
+//         // Send to the chat ID from the reminder
+//         const chatId = reminder.telegramChatId || '7377850240';
+//         await telegramBot.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+//         console.log(`✅ Reminder sent to Telegram (${chatId}): ${reminder.title}`);
         
-      } catch (error: any) {
-        console.error(`❌ Telegram error:`, error.message);
+//       } catch (error: any) {
+//         console.error(`❌ Telegram error:`, error.message);
         
-        // Try again after 5 seconds
-        setTimeout(async () => {
-          try {
-            await telegramBot!.bot!.sendMessage('7377850240', 
-              `🔄 Retry: ${reminder.title}\n${error.message.substring(0, 100)}`,
-              { parse_mode: 'Markdown' }
-            );
-          } catch (retryError) {
-            console.error('❌ Retry also failed');
-          }
-        }, 5000);
-      }
-    } else {
-      console.log('❌ Telegram bot not available');
-    }
-  });
+//         // Try again after 5 seconds
+//         setTimeout(async () => {
+//           try {
+//             await telegramBot!.bot!.sendMessage('7377850240', 
+//               `🔄 Retry: ${reminder.title}\n${error.message.substring(0, 100)}`,
+//               { parse_mode: 'Markdown' }
+//             );
+//           } catch (retryError) {
+//             console.error('❌ Retry also failed');
+//           }
+//         }, 5000);
+//       }
+//     } else {
+//       console.log('❌ Telegram bot not available');
+//     }
+//   });
   
-  if (job) {
-    console.log(`✅ Successfully scheduled: "${reminder.title}" for ${reminderTime.toLocaleString()}`);
-  } else {
-    console.error(`❌ FAILED to schedule: "${reminder.title}"`);
+//   if (job) {
+//     console.log(`✅ Successfully scheduled: "${reminder.title}" for ${reminderTime.toLocaleString()}`);
+//   } else {
+//     console.error(`❌ FAILED to schedule: "${reminder.title}"`);
+//   }
+// }
+function scheduleReminder(reminder: any) {
+  try {
+    // Convert stored UTC time to India time (IST = UTC+5:30)
+    const reminderTimeUTC = new Date(reminder.reminderTime);
+    
+    // IMPORTANT: MongoDB stores in UTC, but we want to schedule in IST
+    // Add 5 hours 30 minutes to convert UTC to IST
+    const reminderTimeIST = new Date(reminderTimeUTC.getTime() + (5.5 * 60 * 60 * 1000));
+    
+    const now = new Date();
+    
+    console.log(`⏰ Scheduling: "${reminder.title}"`);
+    console.log(`   UTC Time: ${reminderTimeUTC.toISOString()}`);
+    console.log(`   IST Time: ${reminderTimeIST.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+    console.log(`   Current Time: ${now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+    console.log(`   Repeat: ${reminder.repeat}`);
+    console.log(`   Time difference: ${Math.round((reminderTimeIST.getTime() - now.getTime()) / 1000)} seconds`);
+    
+    // If time is in the past for "once" reminders, skip
+    if (reminderTimeIST <= now && reminder.repeat === 'once') {
+      console.log(`⚠️ Skipping one-time reminder in the past`);
+      return;
+    }
+    
+    // Handle repeating reminders
+    let rule: schedule.RecurrenceRule | Date;
+    
+    if (reminder.repeat === 'once') {
+      // One-time reminder
+      rule = reminderTimeIST;
+    } else {
+      // Create recurrence rule based on repeat setting
+      rule = new schedule.RecurrenceRule();
+      
+      // Extract time components from the reminder time
+      rule.hour = reminderTimeIST.getHours();
+      rule.minute = reminderTimeIST.getMinutes();
+      rule.second = reminderTimeIST.getSeconds();
+      rule.tz = 'Asia/Kolkata'; // Set timezone to IST
+      
+      switch (reminder.repeat) {
+        case 'daily':
+          // Daily at the same time
+          break;
+          
+        case 'weekly':
+          // Weekly on the same day
+          rule.dayOfWeek = reminderTimeIST.getDay();
+          break;
+          
+        case 'monthly':
+          // Monthly on the same date
+          rule.date = reminderTimeIST.getDate();
+          break;
+          
+        default:
+          // Default to one-time
+          rule = reminderTimeIST;
+      }
+    }
+    
+    // Schedule the job
+    const job = schedule.scheduleJob(`reminder_${reminder._id}`, rule, async function() {
+      console.log(`🔔 REMINDER EXECUTING: ${reminder.title} (${reminder.repeat})`);
+      
+      if (telegramBot && telegramBot.bot) {
+        try {
+          const currentIST = new Date().toLocaleString('en-IN', { 
+            timeZone: 'Asia/Kolkata',
+            hour12: true 
+          });
+          
+          const message = `🔔 **Reminder:** ${reminder.title}\n` +
+                         `${reminder.description || ''}\n\n` +
+                         `⏰ Time: ${currentIST} (IST)\n` +
+                         `🔄 Repeat: ${reminder.repeat}`;
+          
+          // Send to the chat ID from the reminder
+          const chatId = reminder.telegramChatId || '7377850240';
+          await telegramBot.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+          console.log(`✅ Reminder sent to Telegram (${chatId}): ${reminder.title}`);
+          
+          // If it's a one-time reminder, mark as inactive after sending
+          if (reminder.repeat === 'once') {
+            await Reminder.findByIdAndUpdate(reminder._id, { isActive: false });
+            console.log(`📝 One-time reminder marked as inactive`);
+          }
+          
+        } catch (error: any) {
+          console.error(`❌ Telegram error:`, error.message);
+          
+          // Try again after 5 seconds
+          setTimeout(async () => {
+            try {
+              await telegramBot!.bot!.sendMessage('7377850240', 
+                `🔄 Retry: ${reminder.title}\n${error.message.substring(0, 100)}`,
+                { parse_mode: 'Markdown' }
+              );
+            } catch (retryError) {
+              console.error('❌ Retry also failed');
+            }
+          }, 5000);
+        }
+      } else {
+        console.log('❌ Telegram bot not available');
+      }
+    });
+    
+    if (job) {
+      console.log(`✅ Successfully scheduled "${reminder.title}" for ${reminder.repeat} at ${reminderTimeIST.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`);
+      
+      // Store job reference for cancellation if needed
+      reminderScheduledJobs[reminder._id.toString()] = job;
+    } else {
+      console.error(`❌ FAILED to schedule: "${reminder.title}"`);
+    }
+    
+  } catch (error) {
+    console.error(`❌ Error scheduling reminder "${reminder.title}":`, error);
   }
 }
 
