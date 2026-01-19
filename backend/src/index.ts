@@ -169,15 +169,45 @@ class TelegramReminderBot {
   }
 
   private startBot() {
-    try {
-      this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-      this.setupHandlers();
-      this.isActive = true;
-      console.log('🤖 Telegram Reminder Bot started');
-    } catch (error) {
-      console.error('❌ Failed to start Telegram bot:', error);
+  try {
+    if (this.bot) {
+      try {
+        this.bot.stopPolling();
+        console.log(' Stopped previous bot instance');
+      } catch (error) {
+      }
+      this.bot = null;
     }
+    
+    // 🔥 FIX: Add error handler for polling conflicts
+    this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { 
+      polling: true 
+    });
+    
+    
+    
+    this.setupHandlers();
+    this.isActive = true;
+    console.log('🤖 Telegram Reminder Bot started');
+    
+  } catch (error) {
+    console.error('❌ Failed to start Telegram bot:', error);
+    setTimeout(() => {
+      this.startBot();
+    }, 15000);
   }
+}
+
+  // private startBot() {
+  //   try {
+  //     this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+  //     this.setupHandlers();
+  //     this.isActive = true;
+  //     console.log('🤖 Telegram Reminder Bot started');
+  //   } catch (error) {
+  //     console.error('❌ Failed to start Telegram bot:', error);
+  //   }
+  // }
 
   private setupHandlers() {
     if (!this.bot) return;
