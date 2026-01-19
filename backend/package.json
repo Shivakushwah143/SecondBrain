@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsc -b && node dist/index.js"
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc -w & node dist/index.js"
   },
   "keywords": [],
   "author": "",
@@ -28,7 +30,7 @@
     "mongoose": "^9.1.2",
     "multer": "^2.0.2",
     "node-schedule": "^2.1.1",
-    "node-telegram-bot-api": "^0.67.0",
+    "node-telegram-bot-api": "^0.63.0",
     "pdf-parse": "^1.1.1",
     "pdfjs-dist": "^5.4.530",
     "uuid": "^13.0.0",
