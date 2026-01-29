@@ -1,35 +1,27 @@
+
 import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import axios from 'axios';
-import { 
-  FiUser, FiLock, FiLogIn, FiLogOut, FiYoutube, 
+import {
+  FiUser, FiLock, FiLogIn, FiLogOut,
   FiFileText, FiPlus, FiTrash2, FiShare2, FiCopy, FiLink,
-  FiSearch, FiMessageSquare, FiUpload, FiFolder, FiStar,
-  FiChevronRight, FiChevronLeft, FiSettings, FiHelpCircle,
-  FiExternalLink, FiTag, FiCalendar, FiEye, FiEyeOff,
+  FiSearch, FiMessageSquare, FiUpload, FiFolder,
+  FiChevronRight,
+  FiExternalLink, FiCalendar, FiEye, FiEyeOff,
   FiBookmark, FiGrid, FiList, FiDatabase, FiCpu, FiZap,
-  FiHome, FiBell, FiUsers, FiGlobe, FiBookOpen, FiArchive,
-  FiDownload, FiCheck, FiX, FiEdit2, FiFilter, FiClock,
-  FiTrendingUp, FiBarChart2, FiPieChart, FiTarget, FiAward,
-  FiXCircle, FiMoon, FiSun, FiMenu, FiX as FiXIcon,
-  FiChevronDown, FiVideo, FiImage, FiMusic, FiFile,
-  FiAlertCircle, FiInfo, FiRefreshCw, FiSave,
-  FiThumbsUp, FiHeart, FiBook, FiFilePlus, FiMessageCircle,
-  FiBookOpen as FiBookOpenIcon, FiCloud, FiServer, FiGlobe as FiGlobeIcon,
-  FiArrowRight, FiArrowLeft, FiBarChart, FiCheckCircle,
-  FiActivity, FiWind, FiZap as FiZapIcon, FiTarget as FiTargetIcon,
-  FiTool, FiShield, FiGlobe as FiWorld, FiTrendingUp as FiTrendingUpIcon,
-  FiCoffee, FiAward as FiAwardIcon, FiStar as FiStarIcon,
-  FiHeart as FiHeartIcon, FiEye as FiEyeIcon, FiDownloadCloud,
+  FiHome, FiBell, FiCheck, FiX, FiClock,
+  FiTrendingUp, FiTarget,
+  FiMenu, FiX as FiXIcon,
+  FiAlertCircle, FiZap as  
   FiAirplay
 } from 'react-icons/fi';
-import { 
+import {
   SiYoutube, SiAdobeacrobatreader,
-  SiGooglegemini, SiMongodb, SiTailwindcss,
-  SiReact, SiTypescript, SiNodedotjs, SiExpress, SiJavascript, SiNpm,
-  SiDocker, SiGithub, SiVercel, SiNetlify,
+  SiMongodb,
+  SiReact, SiExpress,
   SiX,
   SiAib,
-  SiAiohttp
+  SiAiohttp,
+  SiTelegram  // Add this import
 } from 'react-icons/si';
 
 // ============ TYPES ============
@@ -37,6 +29,19 @@ interface User {
   id: string;
   username: string;
   createdAt?: string;
+  telegramChatId?: string;
+  telegramUsername?: string;
+}
+
+interface Reminder {
+  _id: string;
+  title: string;
+  description?: string;
+  reminderTime: string;
+  repeat: 'once' | 'daily' | 'weekly' | 'monthly';
+  isActive: boolean;
+  telegramChatId?: string;
+  userId: string;
 }
 
 interface Content {
@@ -63,6 +68,11 @@ interface Stats {
   totalPDFs: number;
   totalCollections: number;
   recentActivity: number;
+  activeReminders: number; // Add this
+}
+
+interface TelegramBotStatus {
+  isActive: boolean;
 }
 
 // ============ CONTEXT ============
@@ -72,6 +82,7 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<void>;
   signup: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  updateTelegramInfo: (chatId: string, username: string) => void; // Add this
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -90,6 +101,268 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// ============ UTILITY FUNCTIONS ============
+const formatTime = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+};
+
+const formatDate = (dateString: string) => {
+  return new Date(dateString).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+};
+
+const getTimeAgo = (dateString: string) => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.round(diffMs / 60000);
+  const diffHours = Math.round(diffMs / 3600000);
+  const diffDays = Math.round(diffMs / 86400000);
+
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return formatDate(dateString);
+};
+
+// ============ MODAL COMPONENTS ============
+
+// Reminder Modal Component
+interface ReminderModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  newReminder: any;
+  setNewReminder: (reminder: any) => void;
+  onSubmit: (e: React.FormEvent) => void;
+}
+
+const ReminderModal: React.FC<ReminderModalProps> = ({
+  isOpen, onClose, newReminder, setNewReminder, onSubmit
+}) => {
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(e);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Set New Reminder</h2>
+            <p className="text-sm text-gray-600">Create reminders for important content</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <FiX className="w-6 h-6" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Title *
+            </label>
+            <input
+              type="text"
+              value={newReminder.title}
+              onChange={(e) => setNewReminder({ ...newReminder, title: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              placeholder="Reminder title"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Description (Optional)
+            </label>
+            <textarea
+              value={newReminder.description}
+              onChange={(e) => setNewReminder({ ...newReminder, description: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
+              rows={3}
+              placeholder="Additional details about the reminder"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Date & Time *
+              </label>
+              <input
+                type="datetime-local"
+                value={newReminder.reminderTime}
+                onChange={(e) => setNewReminder({ ...newReminder, reminderTime: e.target.value })}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Repeat
+              </label>
+              <select
+                value={newReminder.repeat}
+                onChange={(e) => setNewReminder({ ...newReminder, repeat: e.target.value as any })}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              >
+                <option value="once">Once</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Telegram Chat ID (Optional)
+            </label>
+            <input
+              type="text"
+              value={newReminder.telegramChatId}
+              onChange={(e) => setNewReminder({ ...newReminder, telegramChatId: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              placeholder="For Telegram notifications"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Enter your Telegram chat ID to get notifications on Telegram
+            </p>
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl border border-gray-300 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!newReminder.title || !newReminder.reminderTime}
+              className="px-6 py-3 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Set Reminder
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Telegram Link Modal Component
+interface TelegramLinkModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  telegramToken: string;
+  setTelegramToken: (token: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  user?: User | null;
+}
+
+const TelegramLinkModal: React.FC<TelegramLinkModalProps> = ({
+  isOpen, onClose, telegramToken, setTelegramToken, onSubmit, user
+}) => {
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(e);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+        <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Link Telegram Account</h2>
+            <p className="text-sm text-gray-600">Connect your Telegram to save content</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <FiX className="w-6 h-6" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div className="flex items-center space-x-3 mb-4">
+            <div className="w-12 h-12 bg-linear-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center">
+              <SiTelegram className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900">Telegram Bot</h3>
+              <p className="text-sm text-gray-600">@SecondBrainBot</p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Authentication Token *
+            </label>
+            <input
+              type="text"
+              value={telegramToken}
+              onChange={(e) => setTelegramToken(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              placeholder="Enter your authentication token"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Get your token from the web app → Profile section
+            </p>
+          </div>
+
+          <div className="bg-linear-to-br from-indigo-50 to-purple-50 rounded-xl p-4 border border-indigo-200">
+            <h4 className="font-medium text-gray-900 mb-2">How to get your token:</h4>
+            <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
+              <li>Go to your Second Brain profile</li>
+              <li>Copy your authentication token</li>
+              <li>Paste it here and link your account</li>
+              <li>Start using the Telegram bot</li>
+            </ol>
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl border border-gray-300 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!telegramToken.trim()}
+              className="px-6 py-3 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Link Account
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
 
 // ============ COMPONENTS ============
 
@@ -124,7 +397,7 @@ const AuthForm: React.FC = () => {
   return (
     <div className="min-h-screen bg-linear-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
       <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-        
+
         {/* Left Column - Brand & Features */}
         <div className="space-y-8">
           {/* Brand */}
@@ -320,15 +593,17 @@ const AuthForm: React.FC = () => {
 
 // 2. Dashboard Component
 const Dashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'pdf' | 'ai' | 'share'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'pdf' | 'ai' | 'reminders' | 'telegram' | 'share'>('dashboard');
   const [content, setContent] = useState<Content[]>([]);
   const [collections, setCollections] = useState<PDFCollection[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({
     totalContent: 0,
     totalPDFs: 0,
     totalCollections: 0,
-    recentActivity: 0
+    recentActivity: 0,
+    activeReminders: 0
   });
   const [newContent, setNewContent] = useState({
     title: '',
@@ -344,7 +619,7 @@ const Dashboard: React.FC = () => {
   const [pdfQuery, setPdfQuery] = useState('');
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [pdfChatLoading, setPdfChatLoading] = useState(false);
-  const [pdfChatResponse, setPdfChatResponse] = useState<{response: string; relevantChunks: number; collectionName: string} | null>(null);
+  const [pdfChatResponse, setPdfChatResponse] = useState<{ response: string; relevantChunks: number; collectionName: string } | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState('');
   const [isSharing, setIsSharing] = useState(false);
@@ -352,30 +627,48 @@ const Dashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // Telegram Reminders State
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [showTelegramLinkModal, setShowTelegramLinkModal] = useState(false);
+  const [telegramToken, setTelegramToken] = useState('');
+  const [telegramBotStatus, setTelegramBotStatus] = useState<TelegramBotStatus>({ isActive: false });
+  const [newReminder, setNewReminder] = useState({
+    title: '',
+    description: '',
+    reminderTime: '',
+    repeat: 'once' as 'once' | 'daily' | 'weekly' | 'monthly',
+    telegramChatId: ''
+  });
+
   const auth = useContext(AuthContext);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchData();
+    checkTelegramBotStatus();
   }, []);
 
   const fetchData = async () => {
     try {
-      const [contentRes, collectionsRes] = await Promise.all([
+      const [contentRes, collectionsRes, remindersRes] = await Promise.all([
         api.get('/content'),
-        api.get('/pdf/collections')
+        api.get('/pdf/collections'),
+        api.get('/reminders')
       ]);
 
       setContent(contentRes.data.content || []);
       setCollections(collectionsRes.data.collections || []);
+      const activeReminders = remindersRes.data.activeReminders || [];
+      setReminders(activeReminders);
 
       const pdfCount = contentRes.data.content?.filter((c: Content) => c.type === 'pdf').length || 0;
-      
+
       setStats({
         totalContent: contentRes.data.count || 0,
         totalPDFs: pdfCount,
         totalCollections: collectionsRes.data.count || 0,
-        recentActivity: contentRes.data.content?.slice(0, 5).length || 0
+        recentActivity: contentRes.data.content?.slice(0, 5).length || 0,
+        activeReminders: activeReminders.length
       });
     } catch (error) {
       console.error('Failed to fetch data:', error);
@@ -384,9 +677,20 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const checkTelegramBotStatus = async () => {
+    try {
+      const response = await api.get('/api/v1/health');
+      if (response.data.services?.telegram === 'active') {
+        setTelegramBotStatus({ isActive: true });
+      }
+    } catch (error) {
+      console.error('Failed to check Telegram bot status:', error);
+    }
+  };
+
   const handleAddContent = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!newContent.title || !newContent.type) {
       alert('Title and type are required');
       return;
@@ -400,10 +704,10 @@ const Dashboard: React.FC = () => {
         }
 
         setUploadingPDF(true);
-        
+
         const formData = new FormData();
         formData.append('pdf', newContent.file);
-        
+
         const uploadResponse = await api.post('/pdf/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
@@ -411,7 +715,7 @@ const Dashboard: React.FC = () => {
         // Refresh collections
         const collectionsRes = await api.get('/pdf/collections');
         setCollections(collectionsRes.data.collections || []);
-        
+
         // Add as content item
         const contentItem: Content = {
           _id: uploadResponse.data.data.contentId,
@@ -422,7 +726,7 @@ const Dashboard: React.FC = () => {
           tags: newContent.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
           createdAt: new Date().toISOString()
         };
-        
+
         setContent(prev => [contentItem, ...prev]);
         setStats(prev => ({
           ...prev,
@@ -438,7 +742,7 @@ const Dashboard: React.FC = () => {
         }
 
         const tags = newContent.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
-        
+
         const response = await api.post('/content', {
           title: newContent.title,
           link: newContent.link,
@@ -453,16 +757,16 @@ const Dashboard: React.FC = () => {
           recentActivity: prev.recentActivity + 1
         }));
       }
-      
+
       // Reset form
-      setNewContent({ 
-        title: '', 
-        link: '', 
-        type: '', 
+      setNewContent({
+        title: '',
+        link: '',
+        type: '',
         tags: '',
-        file: null 
+        file: null
       });
-      
+
     } catch (error: any) {
       console.error('Failed to add content:', error);
       alert(error.response?.data?.message || 'Failed to add content');
@@ -473,7 +777,7 @@ const Dashboard: React.FC = () => {
 
   const handleDeleteContent = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this content?')) return;
-    
+
     try {
       await api.delete('/content', { data: { contentId: id } });
       setContent(prev => prev.filter(item => item._id !== id));
@@ -511,11 +815,11 @@ const Dashboard: React.FC = () => {
       const collection = collections.find(c => c._id === selectedCollection);
       if (!collection) throw new Error('Collection not found');
 
-      const response = await api.post('/pdf/chat', { 
-        query: pdfQuery, 
-        collectionName: collection.name 
+      const response = await api.post('/pdf/chat', {
+        query: pdfQuery,
+        collectionName: collection.name
       });
-      
+
       setPdfChatResponse(response.data);
       setPdfQuery('');
     } catch (error) {
@@ -542,6 +846,100 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // Telegram Reminders Functions
+  const handleAddReminder = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!newReminder.title || !newReminder.reminderTime) {
+      alert('Title and reminder time are required');
+      return;
+    }
+
+    try {
+      const reminderTime = new Date(newReminder.reminderTime).toISOString();
+      const response = await api.post('/reminders', {
+        ...newReminder,
+        reminderTime
+      });
+
+      setReminders(prev => [response.data.reminder, ...prev]);
+      setStats(prev => ({
+        ...prev,
+        activeReminders: prev.activeReminders + 1
+      }));
+
+      setNewReminder({
+        title: '',
+        description: '',
+        reminderTime: '',
+        repeat: 'once',
+        telegramChatId: ''
+      });
+      setShowReminderModal(false);
+
+    } catch (error: any) {
+      console.error('Failed to create reminder:', error);
+      alert(error.response?.data?.message || 'Failed to create reminder');
+    }
+  };
+
+  const handleDeleteReminder = async (id: string) => {
+    try {
+      await api.delete(`/reminders/${id}`);
+      setReminders(prev => prev.filter(r => r._id !== id));
+      setStats(prev => ({
+        ...prev,
+        activeReminders: prev.activeReminders - 1
+      }));
+    } catch (error) {
+      console.error('Failed to delete reminder:', error);
+    }
+  };
+
+  const handleToggleReminder = async (id: string, isActive: boolean) => {
+    try {
+      await api.put(`/reminders/${id}/toggle`);
+      setReminders(prev =>
+        prev.map(r =>
+          r._id === id ? { ...r, isActive: !isActive } : r
+        )
+      );
+      setStats(prev => ({
+        ...prev,
+        activeReminders: isActive ? prev.activeReminders - 1 : prev.activeReminders + 1
+      }));
+    } catch (error) {
+      console.error('Failed to toggle reminder:', error);
+    }
+  };
+
+  const handleLinkTelegram = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!telegramToken) {
+      alert('Please enter your token');
+      return;
+    }
+
+    try {
+      const response = await api.post('/telegram/link', {
+        telegramChatId: 'YOUR_TELEGRAM_CHAT_ID',
+        telegramUsername: auth?.user?.username,
+        token: telegramToken
+      });
+
+      if (auth) {
+        auth.updateTelegramInfo(response.data.telegramChatId, response.data.telegramUsername);
+      }
+
+      setTelegramToken('');
+      setShowTelegramLinkModal(false);
+    } catch (error: any) {
+      console.error('Failed to link Telegram:', error);
+      alert(error.response?.data?.message || 'Failed to link Telegram');
+    }
+  };
+
   const getTypeIcon = (type: string) => {
     switch (type) {
       case 'youtube': return <SiYoutube className="w-5 h-5 text-red-600" />;
@@ -551,14 +949,6 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
-
   const filteredContent = content.filter(item =>
     item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -566,6 +956,11 @@ const Dashboard: React.FC = () => {
 
   const filteredCollections = collections.filter(collection =>
     collection.originalName.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredReminders = reminders.filter(reminder =>
+    reminder.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (reminder.description && reminder.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   if (loading) {
@@ -584,7 +979,7 @@ const Dashboard: React.FC = () => {
     <div className="min-h-screen bg-linear-to-br from-gray-50 to-white">
       {/* Header */}
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-200 shadow-sm">
-        <div className=" mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
             <div className="flex items-center space-x-3">
@@ -606,16 +1001,17 @@ const Dashboard: React.FC = () => {
                 { id: 'content', label: 'Content', icon: FiBookmark },
                 { id: 'pdf', label: 'PDFs', icon: FiFolder },
                 { id: 'ai', label: 'AI Chat', icon: FiMessageSquare },
+                { id: 'reminders', label: 'Reminders', icon: FiBell },
+                { id: 'telegram', label: 'Telegram', icon: SiTelegram },
                 { id: 'share', label: 'Share', icon: FiShare2 }
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center space-x-2 ${
-                    activeTab === tab.id
+                  className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center space-x-2 ${activeTab === tab.id
                       ? 'bg-linear-to-r from-indigo-50 to-purple-50 text-indigo-700 border border-indigo-200'
                       : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                  }`}
+                    }`}
                 >
                   <tab.icon className="w-4 h-4" />
                   <span>{tab.label}</span>
@@ -635,12 +1031,12 @@ const Dashboard: React.FC = () => {
                 />
                 <FiSearch className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
               </div>
-              
+
               <button className="relative p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg">
                 <FiBell className="w-5 h-5" />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
               </button>
-              
+
               <div className="flex items-center space-x-3">
                 <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
                   {auth?.user?.username?.charAt(0).toUpperCase()}
@@ -673,6 +1069,8 @@ const Dashboard: React.FC = () => {
                   { id: 'content', label: 'Content', icon: FiBookmark },
                   { id: 'pdf', label: 'PDFs', icon: FiFolder },
                   { id: 'ai', label: 'AI Chat', icon: FiMessageSquare },
+                  { id: 'reminders', label: 'Reminders', icon: FiBell },
+                  { id: 'telegram', label: 'Telegram', icon: SiTelegram },
                   { id: 'share', label: 'Share', icon: FiShare2 }
                 ].map((tab) => (
                   <button
@@ -681,11 +1079,10 @@ const Dashboard: React.FC = () => {
                       setActiveTab(tab.id as any);
                       setMobileMenuOpen(false);
                     }}
-                    className={`px-4 py-3 rounded-lg font-medium text-sm transition-all flex items-center space-x-3 ${
-                      activeTab === tab.id
+                    className={`px-4 py-3 rounded-lg font-medium text-sm transition-all flex items-center space-x-3 ${activeTab === tab.id
                         ? 'bg-linear-to-r from-indigo-50 to-purple-50 text-indigo-700'
                         : 'text-gray-600 hover:text-gray-900'
-                    }`}
+                      }`}
                   >
                     <tab.icon className="w-5 h-5" />
                     <span>{tab.label}</span>
@@ -697,7 +1094,7 @@ const Dashboard: React.FC = () => {
         </div>
       </header>
 
-      <main className=" mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Welcome Banner */}
         <div className="bg-linear-to-r from-indigo-600 to-purple-600 rounded-2xl shadow-xl p-6 mb-8 text-white relative overflow-hidden">
           <div className="relative z-10 flex items-center justify-between">
@@ -718,35 +1115,42 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           {[
-            { 
-              label: 'Total Content', 
-              value: stats.totalContent, 
+            {
+              label: 'Total Content',
+              value: stats.totalContent,
               icon: FiBookmark,
               color: 'from-blue-500 to-cyan-500',
               change: '+12%'
             },
-            { 
-              label: 'PDF Collections', 
-              value: stats.totalCollections, 
+            {
+              label: 'PDF Collections',
+              value: stats.totalCollections,
               icon: FiFolder,
               color: 'from-emerald-500 to-teal-500',
               change: '+8%'
             },
-            { 
-              label: 'PDF Files', 
-              value: stats.totalPDFs, 
+            {
+              label: 'PDF Files',
+              value: stats.totalPDFs,
               icon: FiFileText,
               color: 'from-purple-500 to-pink-500',
               change: '+5%'
             },
-            { 
-              label: 'Recent Activity', 
-              value: stats.recentActivity, 
-              icon: FiTrendingUp,
+            {
+              label: 'Active Reminders',
+              value: stats.activeReminders,
+              icon: FiBell,
               color: 'from-amber-500 to-orange-500',
               change: '+24%'
+            },
+            {
+              label: 'Recent Activity',
+              value: stats.recentActivity,
+              icon: FiTrendingUp,
+              color: 'from-yellow-500 to-amber-500',
+              change: '+18%'
             }
           ].map((stat, index) => (
             <div
@@ -784,7 +1188,7 @@ const Dashboard: React.FC = () => {
                     <span className="text-sm text-gray-600">Quick Add</span>
                   </div>
                 </div>
-                
+
                 <form onSubmit={handleAddContent} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -800,12 +1204,12 @@ const Dashboard: React.FC = () => {
                         required
                       />
                     </div>
-                    
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         {newContent.type === 'pdf' ? 'Upload PDF' : 'URL'}
                       </label>
-                      
+
                       {newContent.type === 'pdf' ? (
                         <div className="relative">
                           <input
@@ -814,8 +1218,8 @@ const Dashboard: React.FC = () => {
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                setNewContent(prev => ({ 
-                                  ...prev, 
+                                setNewContent(prev => ({
+                                  ...prev,
                                   link: file.name,
                                   file: file,
                                   title: prev.title || file.name.replace(/\.[^/.]+$/, "")
@@ -839,7 +1243,7 @@ const Dashboard: React.FC = () => {
                       )}
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -848,8 +1252,8 @@ const Dashboard: React.FC = () => {
                       <select
                         value={newContent.type}
                         onChange={(e) => {
-                          setNewContent(prev => ({ 
-                            ...prev, 
+                          setNewContent(prev => ({
+                            ...prev,
                             type: e.target.value,
                             link: '',
                             file: null
@@ -864,7 +1268,7 @@ const Dashboard: React.FC = () => {
                         <option value="pdf">PDF Document</option>
                       </select>
                     </div>
-                    
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Tags
@@ -877,7 +1281,7 @@ const Dashboard: React.FC = () => {
                         placeholder="tag1, tag2, tag3"
                       />
                     </div>
-                    
+
                     <div className="flex items-end">
                       <button
                         type="submit"
@@ -898,7 +1302,7 @@ const Dashboard: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  
+
                   {newContent.type === 'pdf' && newContent.file && (
                     <div className="mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
                       <p className="text-sm text-emerald-700 flex items-center">
@@ -918,7 +1322,7 @@ const Dashboard: React.FC = () => {
                   <h2 className="text-lg font-semibold text-gray-900">Chat with PDF</h2>
                   <FiMessageSquare className="w-5 h-5 text-indigo-500" />
                 </div>
-                
+
                 {/* Collection Selector */}
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -929,11 +1333,10 @@ const Dashboard: React.FC = () => {
                       <button
                         key={collection._id}
                         onClick={() => setSelectedCollection(collection._id)}
-                        className={`p-4 rounded-xl border transition-all flex items-center space-x-3 ${
-                          selectedCollection === collection._id
+                        className={`p-4 rounded-xl border transition-all flex items-center space-x-3 ${selectedCollection === collection._id
                             ? 'border-indigo-500 bg-indigo-50'
                             : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                        }`}
+                          }`}
                       >
                         <div className="w-10 h-10 bg-linear-to-br from-red-100 to-red-200 rounded-lg flex items-center justify-center">
                           <SiAdobeacrobatreader className="w-5 h-5 text-red-600" />
@@ -1020,7 +1423,7 @@ const Dashboard: React.FC = () => {
                     <FiCpu className="w-5 h-5 text-white" />
                   </div>
                 </div>
-                
+
                 <div className="space-y-4">
                   {aiResponse ? (
                     <div className="space-y-4">
@@ -1048,7 +1451,7 @@ const Dashboard: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                      
+
                       <form onSubmit={handleAIChat} className="space-y-3">
                         <div className="relative">
                           <input
@@ -1081,6 +1484,179 @@ const Dashboard: React.FC = () => {
               </div>
             )}
 
+            {/* Reminders Interface */}
+            {activeTab === 'reminders' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-gray-900">Reminders</h2>
+                  <button
+                    onClick={() => setShowReminderModal(true)}
+                    className="px-4 py-2 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all flex items-center space-x-2"
+                  >
+                    <FiPlus className="w-4 h-4" />
+                    <span>New Reminder</span>
+                  </button>
+                </div>
+
+                {filteredReminders.length === 0 ? (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
+                    <div className="w-16 h-16 bg-linear-to-br from-indigo-50 to-purple-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                      <FiBell className="w-8 h-8 text-indigo-500" />
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No reminders yet</h3>
+                    <p className="text-gray-600 mb-6">Set reminders for important content and tasks</p>
+                    <button
+                      onClick={() => setShowReminderModal(true)}
+                      className="px-6 py-3 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all"
+                    >
+                      Create Your First Reminder
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {filteredReminders.map((reminder) => (
+                      <div
+                        key={reminder._id}
+                        className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-lg transition-shadow"
+                      >
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-center space-x-3">
+                            <div className={`p-3 rounded-xl ${reminder.isActive
+                                ? 'bg-emerald-100 text-emerald-600 border border-emerald-200'
+                                : 'bg-gray-100 text-gray-600 border border-gray-200'
+                              }`}>
+                              <FiBell className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h3 className="font-semibold text-gray-900">{reminder.title}</h3>
+                              <div className="flex items-center space-x-2 mt-1">
+                                <span className={`text-xs px-2 py-1 rounded-full ${reminder.isActive
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : 'bg-gray-100 text-gray-700'
+                                  }`}>
+                                  {reminder.isActive ? 'Active' : 'Inactive'}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {reminder.repeat}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => handleToggleReminder(reminder._id, reminder.isActive)}
+                              className={`p-2 rounded-lg ${reminder.isActive ? 'hover:bg-red-100' : 'hover:bg-emerald-100'}`}
+                              title={reminder.isActive ? 'Deactivate' : 'Activate'}
+                            >
+                              {reminder.isActive ? (
+                                <FiBell className="w-4 h-4 text-red-500" />
+                              ) : (
+                                <FiBell className="w-4 h-4 text-emerald-500" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteReminder(reminder._id)}
+                              className="p-2 hover:bg-red-100 rounded-lg"
+                              title="Delete"
+                            >
+                              <FiTrash2 className="w-4 h-4 text-red-500" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {reminder.description && (
+                          <p className="text-gray-600 text-sm mb-4">
+                            {reminder.description}
+                          </p>
+                        )}
+
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center justify-between text-gray-700">
+                            <span className="flex items-center space-x-2">
+                              <FiClock className="w-4 h-4 text-indigo-500" />
+                              <span>Time:</span>
+                            </span>
+                            <span className="font-medium">{formatTime(reminder.reminderTime)}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-gray-700">
+                            <span className="flex items-center space-x-2">
+                              <FiCalendar className="w-4 h-4 text-indigo-500" />
+                              <span>Date:</span>
+                            </span>
+                            <span className="font-medium">{formatDate(reminder.reminderTime)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Telegram Interface */}
+            {activeTab === 'telegram' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Telegram Bot</h2>
+                    <p className="text-sm text-gray-600">Save content directly from Telegram</p>
+                  </div>
+                  <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${telegramBotStatus.isActive
+                      ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                      : 'bg-red-100 text-red-700 border border-red-200'
+                    }`}>
+                    {telegramBotStatus.isActive ? 'Bot Active' : 'Bot Offline'}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-linear-to-br from-indigo-50 to-purple-50 rounded-2xl p-6 border border-indigo-200">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-linear-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center">
+                        <SiTelegram className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">Link Your Account</h3>
+                        <p className="text-sm text-gray-600">Connect Telegram to save content</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowTelegramLinkModal(true)}
+                      className="w-full py-3 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all"
+                    >
+                      Link Telegram Account
+                    </button>
+                  </div>
+
+                  <div className="bg-linear-to-br from-blue-50 to-cyan-50 rounded-2xl p-6 border border-blue-200">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-linear-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center">
+                        <FiMessageSquare className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">Bot Commands</h3>
+                        <p className="text-sm text-gray-600">Available commands</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <code className="block text-sm bg-white/50 px-3 py-2 rounded-lg font-mono">
+                        /start - Start the bot
+                      </code>
+                      <code className="block text-sm bg-white/50 px-3 py-2 rounded-lg font-mono">
+                        /addcontent - Save content
+                      </code>
+                      <code className="block text-sm bg-white/50 px-3 py-2 rounded-lg font-mono">
+                        /mycontent - View your content
+                      </code>
+                      <code className="block text-sm bg-white/50 px-3 py-2 rounded-lg font-mono">
+                        /remind - Set a reminder
+                      </code>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Content Display */}
             {(activeTab === 'dashboard' || activeTab === 'content') && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
@@ -1094,13 +1670,13 @@ const Dashboard: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <button 
+                    <button
                       onClick={() => setViewMode('grid')}
                       className={`p-2 rounded-lg ${viewMode === 'grid' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:text-gray-900'}`}
                     >
                       <FiGrid className="w-5 h-5" />
                     </button>
-                    <button 
+                    <button
                       onClick={() => setViewMode('list')}
                       className={`p-2 rounded-lg ${viewMode === 'list' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:text-gray-900'}`}
                     >
@@ -1138,9 +1714,9 @@ const Dashboard: React.FC = () => {
                             <FiTrash2 className="w-4 h-4" />
                           </button>
                         </div>
-                        
+
                         <p className="text-sm text-gray-600 mb-3 line-clamp-2">{item.link}</p>
-                        
+
                         <div className="flex flex-wrap gap-1 mb-3">
                           {item.tags.slice(0, 3).map((tag, idx) => (
                             <span key={idx} className="px-2 py-1 text-xs font-medium bg-indigo-50 text-indigo-700 rounded">
@@ -1148,7 +1724,7 @@ const Dashboard: React.FC = () => {
                             </span>
                           ))}
                         </div>
-                        
+
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <span>{formatDate(item.createdAt)}</span>
                           <a
@@ -1174,7 +1750,7 @@ const Dashboard: React.FC = () => {
                               {getTypeIcon(item.type)}
                             </div>
                           </div>
-                          
+
                           <div className="flex-grow min-w-0">
                             <div className="flex justify-between items-start">
                               <h3 className="font-semibold text-gray-900 truncate">{item.title}</h3>
@@ -1190,9 +1766,9 @@ const Dashboard: React.FC = () => {
                                 </button>
                               </div>
                             </div>
-                            
+
                             <p className="text-sm text-gray-600 mt-1 truncate">{item.link}</p>
-                            
+
                             <div className="flex items-center justify-between mt-4">
                               <div className="flex items-center space-x-2">
                                 {item.tags.slice(0, 3).map((tag, idx) => (
@@ -1201,7 +1777,7 @@ const Dashboard: React.FC = () => {
                                   </span>
                                 ))}
                               </div>
-                              
+
                               <div className="flex items-center space-x-4 text-sm text-gray-500">
                                 <span className="flex items-center">
                                   <FiCalendar className="w-3 h-3 mr-1.5" />
@@ -1224,7 +1800,7 @@ const Dashboard: React.FC = () => {
                     ))}
                   </div>
                 )}
-                
+
                 {filteredContent.length > 6 && (
                   <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
                     <button className="w-full text-center text-indigo-600 hover:text-indigo-700 font-medium">
@@ -1276,7 +1852,7 @@ const Dashboard: React.FC = () => {
                             <FiMessageSquare className="w-4 h-4" />
                           </button>
                         </div>
-                        
+
                         <div className="space-y-2 mb-3">
                           <div className="flex items-center justify-between text-xs text-gray-500">
                             <span>Uploaded:</span>
@@ -1289,7 +1865,7 @@ const Dashboard: React.FC = () => {
                             </code>
                           </div>
                         </div>
-                        
+
                         <div className="flex items-center justify-between">
                           <button
                             onClick={() => setSelectedCollection(collection._id)}
@@ -1322,7 +1898,7 @@ const Dashboard: React.FC = () => {
                   <FiPlus className="w-5 h-5 text-indigo-600 mb-2" />
                   <span className="text-xs font-medium text-gray-700">Add Content</span>
                 </button>
-                
+
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="p-3 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all flex flex-col items-center justify-center"
@@ -1330,21 +1906,21 @@ const Dashboard: React.FC = () => {
                   <FiUpload className="w-5 h-5 text-indigo-600 mb-2" />
                   <span className="text-xs font-medium text-gray-700">Upload PDF</span>
                 </button>
-                
+
+                <button
+                  onClick={() => setActiveTab('reminders')}
+                  className="p-3 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all flex flex-col items-center justify-center"
+                >
+                  <FiBell className="w-5 h-5 text-indigo-600 mb-2" />
+                  <span className="text-xs font-medium text-gray-700">Reminders</span>
+                </button>
+
                 <button
                   onClick={() => setActiveTab('ai')}
                   className="p-3 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all flex flex-col items-center justify-center"
                 >
                   <FiMessageSquare className="w-5 h-5 text-indigo-600 mb-2" />
                   <span className="text-xs font-medium text-gray-700">AI Chat</span>
-                </button>
-                
-                <button
-                  onClick={() => setShowShareModal(true)}
-                  className="p-3 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all flex flex-col items-center justify-center"
-                >
-                  <FiShare2 className="w-5 h-5 text-indigo-600 mb-2" />
-                  <span className="text-xs font-medium text-gray-700">Share</span>
                 </button>
               </div>
             </div>
@@ -1355,9 +1931,9 @@ const Dashboard: React.FC = () => {
                 <h2 className="text-lg font-semibold text-gray-900">Upload PDF</h2>
                 <FiUpload className="w-5 h-5 text-indigo-500" />
               </div>
-              
+
               <div className="space-y-4">
-                <div 
+                <div
                   className="border-3 border-dashed border-gray-300 rounded-2xl p-8 text-center hover:border-indigo-400 transition-colors cursor-pointer bg-gray-50 hover:bg-indigo-50"
                   onClick={() => fileInputRef.current?.click()}
                 >
@@ -1375,8 +1951,8 @@ const Dashboard: React.FC = () => {
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        setNewContent(prev => ({ 
-                          ...prev, 
+                        setNewContent(prev => ({
+                          ...prev,
                           type: 'pdf',
                           link: file.name,
                           file: file,
@@ -1388,14 +1964,14 @@ const Dashboard: React.FC = () => {
                     disabled={uploadingPDF}
                   />
                 </div>
-                
+
                 {uploadingPDF && (
                   <div className="flex items-center justify-center space-x-3">
                     <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                     <span className="text-gray-600">Processing PDF...</span>
                   </div>
                 )}
-                
+
                 <div className="text-xs text-gray-500 space-y-1">
                   <p className="flex items-center">
                     <FiCheck className="w-3 h-3 mr-2 text-emerald-500" />
@@ -1422,7 +1998,7 @@ const Dashboard: React.FC = () => {
                   <span className="text-sm font-medium text-gray-700">{collections.length}</span>
                 </div>
               </div>
-              
+
               {collections.length === 0 ? (
                 <div className="text-center py-6">
                   <FiFolder className="w-12 h-12 text-gray-300 mx-auto mb-4" />
@@ -1463,9 +2039,9 @@ const Dashboard: React.FC = () => {
                       </button>
                     </div>
                   ))}
-                  
+
                   {collections.length > 3 && (
-                    <button 
+                    <button
                       onClick={() => setActiveTab('pdf')}
                       className="w-full text-center text-indigo-600 hover:text-indigo-700 font-medium text-sm pt-2"
                     >
@@ -1512,7 +2088,7 @@ const Dashboard: React.FC = () => {
 
       {/* Share Modal */}
       {showShareModal && (
-        <ShareModal 
+        <ShareModal
           isOpen={showShareModal}
           onClose={() => setShowShareModal(false)}
           shareLink={shareLink}
@@ -1521,9 +2097,28 @@ const Dashboard: React.FC = () => {
         />
       )}
 
+      {/* Reminder Modal */}
+      <ReminderModal
+        isOpen={showReminderModal}
+        onClose={() => setShowReminderModal(false)}
+        newReminder={newReminder}
+        setNewReminder={setNewReminder}
+        onSubmit={handleAddReminder}
+      />
+
+      {/* Telegram Link Modal */}
+      <TelegramLinkModal
+        isOpen={showTelegramLinkModal}
+        onClose={() => setShowTelegramLinkModal(false)}
+        telegramToken={telegramToken}
+        setTelegramToken={setTelegramToken}
+        onSubmit={handleLinkTelegram}
+        user={auth?.user}
+      />
+
       {/* Footer */}
       <footer className="border-t border-gray-200 bg-white mt-12">
-        <div className=" mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center space-x-3 mb-4">
@@ -1539,7 +2134,7 @@ const Dashboard: React.FC = () => {
                 Your AI-powered second brain for organizing, discovering, and growing knowledge.
               </p>
             </div>
-            
+
             {['Product', 'Resources', 'Company', 'Connect'].map((category) => (
               <div key={category}>
                 <h4 className="font-semibold text-gray-900 mb-4">{category}</h4>
@@ -1555,7 +2150,7 @@ const Dashboard: React.FC = () => {
               </div>
             ))}
           </div>
-          
+
           <div className="border-t border-gray-200 mt-8 pt-8 text-center text-sm text-gray-500">
             <p>© {new Date().getFullYear()} Second Brain. All rights reserved.</p>
             <p className="mt-2">Built with ❤️ for knowledge seekers everywhere</p>
@@ -1590,11 +2185,11 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, shareLink, isS
   if (!isOpen) return null;
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
-      <div 
+      <div
         className="bg-white rounded-2xl shadow-2xl max-w-md w-full"
         onClick={(e) => e.stopPropagation()}
       >
@@ -1621,14 +2216,12 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, shareLink, isS
             </div>
             <button
               onClick={onToggleShare}
-              className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors ${
-                isSharing ? 'bg-linear-to-r from-indigo-500 to-purple-500' : 'bg-gray-300'
-              }`}
+              className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors ${isSharing ? 'bg-linear-to-r from-indigo-500 to-purple-500' : 'bg-gray-300'
+                }`}
             >
               <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                  isSharing ? 'translate-x-8' : 'translate-x-1'
-                }`}
+                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${isSharing ? 'translate-x-8' : 'translate-x-1'
+                  }`}
               />
             </button>
           </div>
@@ -1639,7 +2232,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, shareLink, isS
                 <FiLink className="w-4 h-4 flex-shrink-0" />
                 <span>Share link is now active</span>
               </div>
-              
+
               <div className="space-y-3">
                 <div className="flex items-center space-x-2">
                   <input
@@ -1666,7 +2259,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, shareLink, isS
                     )}
                   </button>
                 </div>
-                
+
                 <div className="bg-gray-50 rounded-lg p-4">
                   <p className="text-sm text-gray-600">
                     Share this link with colleagues, friends, or post it anywhere. Viewers will see all your public content in a clean, organized interface.
@@ -1730,7 +2323,7 @@ const App: React.FC = () => {
   const login = async (username: string, password: string) => {
     const response = await api.post('/signin', { username, password });
     const { token, user } = response.data;
-    
+
     localStorage.setItem('token', token);
     setToken(token);
     setUser(user);
@@ -1739,7 +2332,7 @@ const App: React.FC = () => {
   const signup = async (username: string, password: string) => {
     const response = await api.post('/signup', { username, password });
     const { token, user } = response.data;
-    
+
     localStorage.setItem('token', token);
     setToken(token);
     setUser(user);
@@ -1749,6 +2342,10 @@ const App: React.FC = () => {
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
+  };
+
+  const updateTelegramInfo = (chatId: string, username: string) => {
+    setUser(prev => prev ? { ...prev, telegramChatId: chatId, telegramUsername: username } : null);
   };
 
   if (loading) {
@@ -1764,11 +2361,11 @@ const App: React.FC = () => {
   }
 
   return (
-    <AuthContext.Provider value={{ token, user, login, signup, logout }}>
+    <AuthContext.Provider value={{ token, user, login, signup, logout, updateTelegramInfo }}>
       {token ? <Dashboard /> : <AuthForm />}
     </AuthContext.Provider>
   );
 };
 
-// ============ ENTRY POINT ============
+
 export default App;
