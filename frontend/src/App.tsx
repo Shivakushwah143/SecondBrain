@@ -17,7 +17,7 @@ import {
 import {
   SiYoutube, SiAdobeacrobatreader,
   SiMongodb,
-  SiReact, SiExpress,
+  SiReact, SiExpress,SiTypescript,
   SiX,
   SiAib,
   SiAiohttp,
@@ -120,19 +120,6 @@ const formatDate = (dateString: string) => {
   });
 };
 
-const getTimeAgo = (dateString: string) => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.round(diffMs / 60000);
-  const diffHours = Math.round(diffMs / 3600000);
-  const diffDays = Math.round(diffMs / 86400000);
-
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 30) return `${diffDays}d ago`;
-  return formatDate(dateString);
-};
 
 // ============ MODAL COMPONENTS ============
 
@@ -279,7 +266,7 @@ interface TelegramLinkModalProps {
 }
 
 const TelegramLinkModal: React.FC<TelegramLinkModalProps> = ({
-  isOpen, onClose, telegramToken, setTelegramToken, onSubmit, user
+  isOpen, onClose, telegramToken, setTelegramToken, onSubmit
 }) => {
   if (!isOpen) return null;
 
@@ -1152,7 +1139,7 @@ const Dashboard: React.FC = () => {
               color: 'from-yellow-500 to-amber-500',
               change: '+18%'
             }
-          ].map((stat, index) => (
+          ].map((stat) => (
             <div
               key={stat.label}
               className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
