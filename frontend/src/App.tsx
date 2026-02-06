@@ -1,17 +1,18 @@
 
-import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, createContext, useContext, useRef } from 'react';
 import axios from 'axios';
+import { SignIn, SignUp, useAuth, useUser } from '@clerk/clerk-react';
 import {
-  FiUser, FiLock, FiLogIn, FiLogOut,
+  FiLogOut,
   FiFileText, FiPlus, FiTrash2, FiShare2, FiCopy, FiLink,
   FiSearch, FiMessageSquare, FiUpload, FiFolder,
   FiChevronRight,
-  FiExternalLink, FiCalendar, FiEye, FiEyeOff,
+  FiExternalLink, FiCalendar,
   FiBookmark, FiGrid, FiList, FiDatabase, FiCpu, FiZap,
   FiHome, FiBell, FiCheck, FiX, FiClock,
   FiTrendingUp, FiTarget,
   FiMenu, FiX as FiXIcon,
-  FiAlertCircle, FiZap as  
+  FiZap as  
   FiAirplay
 } from 'react-icons/fi';
 import {
@@ -75,14 +76,25 @@ interface TelegramBotStatus {
   isActive: boolean;
 }
 
+type DashboardTab = 'dashboard' | 'content' | 'pdf' | 'ai' | 'reminders' | 'telegram' | 'share';
+
+type ReminderRepeat = Reminder['repeat'];
+
+interface NewReminder {
+  title: string;
+  description: string;
+  reminderTime: string;
+  repeat: ReminderRepeat;
+  telegramChatId: string;
+}
+
 // ============ CONTEXT ============
 interface AuthContextType {
-  token: string | null;
   user: User | null;
-  login: (username: string, password: string) => Promise<void>;
-  signup: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateTelegramInfo: (chatId: string, username: string) => void; // Add this
+  legacySignIn: (usernameOrEmail: string, password: string) => Promise<void>;
+  legacySignUp: (usernameOrEmail: string, password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -94,13 +106,14 @@ const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (axios.isAxiosError(error)) {
+    const maybeMessage = (error.response?.data as { message?: string } | undefined)?.message;
+    return maybeMessage || fallback;
   }
-  return config;
-});
+  if (error instanceof Error) return error.message;
+  return fallback;
+};
 
 // ============ UTILITY FUNCTIONS ============
 const formatTime = (dateString: string) => {
@@ -127,8 +140,8 @@ const formatDate = (dateString: string) => {
 interface ReminderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  newReminder: any;
-  setNewReminder: (reminder: any) => void;
+  newReminder: NewReminder;
+  setNewReminder: (reminder: NewReminder) => void;
   onSubmit: (e: React.FormEvent) => void;
 }
 
@@ -206,7 +219,7 @@ const ReminderModal: React.FC<ReminderModalProps> = ({
               </label>
               <select
                 value={newReminder.repeat}
-                onChange={(e) => setNewReminder({ ...newReminder, repeat: e.target.value as any })}
+                onChange={(e) => setNewReminder({ ...newReminder, repeat: e.target.value as ReminderRepeat })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               >
                 <option value="once">Once</option>
@@ -353,31 +366,31 @@ const TelegramLinkModal: React.FC<TelegramLinkModalProps> = ({
 
 // ============ COMPONENTS ============
 
-// 1. Login/Signup Component
+// 1. Auth Component (Clerk + Legacy)
 const AuthForm: React.FC = () => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
   const auth = useContext(AuthContext);
+  const [authMethod, setAuthMethod] = useState<'clerk' | 'legacy'>('clerk');
+  const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn');
+  const [usernameOrEmail, setUsernameOrEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [legacyLoading, setLegacyLoading] = useState(false);
+  const [legacyError, setLegacyError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLegacySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setLoading(true);
-
+    if (!auth) return;
+    setLegacyError('');
+    setLegacyLoading(true);
     try {
-      if (isLogin && auth) {
-        await auth.login(username, password);
-      } else if (!isLogin && auth) {
-        await auth.signup(username, password);
+      if (mode === 'signIn') {
+        await auth.legacySignIn(usernameOrEmail, password);
+      } else {
+        await auth.legacySignUp(usernameOrEmail, password);
       }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'An error occurred');
+    } catch (error: unknown) {
+      setLegacyError(getErrorMessage(error, 'Authentication failed'));
     } finally {
-      setLoading(false);
+      setLegacyLoading(false);
     }
   };
 
@@ -448,129 +461,111 @@ const AuthForm: React.FC = () => {
 
         {/* Right Column - Auth Form */}
         <div className="bg-white rounded-3xl shadow-2xl p-8 border border-gray-100">
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <button
+              type="button"
+              onClick={() => setAuthMethod('clerk')}
+              className={`px-4 py-2 rounded-xl border transition-colors ${authMethod === 'clerk'
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
+                }`}
+            >
+              Continue with Google
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuthMethod('legacy')}
+              className={`px-4 py-2 rounded-xl border transition-colors ${authMethod === 'legacy'
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
+                }`}
+            >
+              Email & Password
+            </button>
+          </div>
+
           <div className="text-center mb-8">
             <h2 className="text-2xl font-bold text-gray-900">
-              {isLogin ? 'Welcome Back 👋' : 'Join Second Brain 🚀'}
+              {mode === 'signIn' ? 'Welcome Back 👋' : 'Join Second Brain 🚀'}
             </h2>
             <p className="text-gray-600 mt-2">
-              {isLogin ? 'Sign in to access your knowledge base' : 'Create your account to get started'}
+              {mode === 'signIn' ? 'Sign in to access your knowledge base' : 'Create your account to get started'}
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                <p className="text-red-700 text-sm flex items-center">
-                  <FiAlertCircle className="w-4 h-4 mr-2" />
-                  {error}
-                </p>
-              </div>
-            )}
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <button
+              type="button"
+              onClick={() => setMode('signIn')}
+              className={`px-4 py-2 rounded-xl border transition-colors ${mode === 'signIn'
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
+                }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('signUp')}
+              className={`px-4 py-2 rounded-xl border transition-colors ${mode === 'signUp'
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
+                }`}
+            >
+              Sign Up
+            </button>
+          </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Username
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <FiUser className="h-5 w-5 text-gray-400" />
+          <div className="flex justify-center">
+            {authMethod === 'clerk' ? (
+              mode === 'signIn' ? <SignIn /> : <SignUp />
+            ) : (
+              <form onSubmit={handleLegacySubmit} className="w-full max-w-sm space-y-4">
+                {legacyError && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                    <p className="text-red-700 text-sm">{legacyError}</p>
                   </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Email / Username
+                  </label>
                   <input
                     type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="block w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all placeholder:text-gray-400"
-                    placeholder="Enter your username"
+                    value={usernameOrEmail}
+                    onChange={(e) => setUsernameOrEmail(e.target.value)}
+                    className="block w-full px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all placeholder:text-gray-400"
+                    placeholder="you@example.com"
                     required
+                    autoComplete="username"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <FiLock className="h-5 w-5 text-gray-400" />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Password
+                  </label>
                   <input
-                    type={showPassword ? "text" : "password"}
+                    type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full pl-10 pr-12 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all placeholder:text-gray-400"
-                    placeholder="Enter your password"
+                    className="block w-full px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all placeholder:text-gray-400"
+                    placeholder="••••••••"
                     required
+                    autoComplete={mode === 'signIn' ? 'current-password' : 'new-password'}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <FiEyeOff className="h-5 w-5" /> : <FiEye className="h-5 w-5" />}
-                  </button>
                 </div>
-              </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-4 px-4 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <div className="flex items-center justify-center">
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-3"></div>
-                  Processing...
-                </div>
-              ) : (
-                <div className="flex items-center justify-center">
-                  {isLogin ? (
-                    <>
-                      <FiLogIn className="w-5 h-5 mr-3" />
-                      Sign In to Dashboard
-                    </>
-                  ) : (
-                    <>
-                      <FiUser className="w-5 h-5 mr-3" />
-                      Create Account
-                    </>
-                  )}
-                </div>
-              )}
-            </button>
-          </form>
-
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <button
-              onClick={() => setIsLogin(!isLogin)}
-              className="w-full text-center text-gray-600 hover:text-gray-900 font-medium transition-colors group"
-            >
-              {isLogin ? (
-                <>
-                  Don't have an account?{' '}
-                  <span className="text-indigo-600 font-semibold group-hover:text-indigo-700">
-                    Sign up now →
-                  </span>
-                </>
-              ) : (
-                <>
-                  Already have an account?{' '}
-                  <span className="text-indigo-600 font-semibold group-hover:text-indigo-700">
-                    Sign in →
-                  </span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Demo Credentials */}
-          <div className="mt-6 p-4 bg-linear-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
-            <p className="text-sm text-blue-800 font-medium mb-2">💡 Demo Credentials</p>
-            <p className="text-xs text-blue-600">
-              Username: <span className="font-mono">demo</span> | Password: <span className="font-mono">demo123</span>
-            </p>
+                <button
+                  type="submit"
+                  disabled={legacyLoading}
+                  className="w-full py-3 px-4 bg-linear-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {legacyLoading ? 'Please wait…' : mode === 'signIn' ? 'Sign In' : 'Create Account'}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       </div>
@@ -580,7 +575,7 @@ const AuthForm: React.FC = () => {
 
 // 2. Dashboard Component
 const Dashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'pdf' | 'ai' | 'reminders' | 'telegram' | 'share'>('dashboard');
+  const [activeTab, setActiveTab] = useState<DashboardTab>('dashboard');
   const [content, setContent] = useState<Content[]>([]);
   const [collections, setCollections] = useState<PDFCollection[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -623,9 +618,9 @@ const Dashboard: React.FC = () => {
     title: '',
     description: '',
     reminderTime: '',
-    repeat: 'once' as 'once' | 'daily' | 'weekly' | 'monthly',
+    repeat: 'once' as ReminderRepeat,
     telegramChatId: ''
-  });
+  } satisfies NewReminder);
 
   const auth = useContext(AuthContext);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -754,9 +749,9 @@ const Dashboard: React.FC = () => {
         file: null
       });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to add content:', error);
-      alert(error.response?.data?.message || 'Failed to add content');
+      alert(getErrorMessage(error, 'Failed to add content'));
     } finally {
       setUploadingPDF(false);
     }
@@ -864,9 +859,9 @@ const Dashboard: React.FC = () => {
       });
       setShowReminderModal(false);
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to create reminder:', error);
-      alert(error.response?.data?.message || 'Failed to create reminder');
+      alert(getErrorMessage(error, 'Failed to create reminder'));
     }
   };
 
@@ -921,9 +916,9 @@ const Dashboard: React.FC = () => {
 
       setTelegramToken('');
       setShowTelegramLinkModal(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to link Telegram:', error);
-      alert(error.response?.data?.message || 'Failed to link Telegram');
+      alert(getErrorMessage(error, 'Failed to link Telegram'));
     }
   };
 
@@ -994,7 +989,7 @@ const Dashboard: React.FC = () => {
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => setActiveTab(tab.id as DashboardTab)}
                   className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center space-x-2 ${activeTab === tab.id
                       ? 'bg-linear-to-r from-indigo-50 to-purple-50 text-indigo-700 border border-indigo-200'
                       : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
@@ -1063,7 +1058,7 @@ const Dashboard: React.FC = () => {
                   <button
                     key={tab.id}
                     onClick={() => {
-                      setActiveTab(tab.id as any);
+                      setActiveTab(tab.id as DashboardTab);
                       setMobileMenuOpen(false);
                     }}
                     className={`px-4 py-3 rounded-lg font-medium text-sm transition-all flex items-center space-x-3 ${activeTab === tab.id
@@ -2284,58 +2279,108 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, shareLink, isS
 
 // 4. Main App Component
 const App: React.FC = () => {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
+  const { user: clerkUser } = useUser();
+  const [legacyToken, setLegacyToken] = useState<string | null>(() => localStorage.getItem('token'));
+  const [telegramInfo, setTelegramInfo] = useState<{ telegramChatId?: string; telegramUsername?: string }>({});
+  const [legacyUser, setLegacyUser] = useState<User | null>(null);
+
+  const isClerkAuthed = Boolean(isLoaded && isSignedIn && clerkUser);
+  const isLegacyAuthed = Boolean(legacyToken);
+
+  const clerkAppUser: User | null = isClerkAuthed
+    ? {
+        id: clerkUser!.id,
+        username:
+          clerkUser!.username ??
+          clerkUser!.primaryEmailAddress?.emailAddress ??
+          clerkUser!.firstName ??
+          'User',
+        createdAt: clerkUser!.createdAt ? new Date(clerkUser!.createdAt).toISOString() : undefined,
+        telegramChatId: telegramInfo.telegramChatId,
+        telegramUsername: telegramInfo.telegramUsername,
+      }
+    : null;
+
+  const user: User | null = clerkAppUser ?? (legacyUser ? { ...legacyUser, ...telegramInfo } : null);
+
+  useLayoutEffect(() => {
+    if (!isLoaded) return;
+
+    const interceptorId = api.interceptors.request.use(async (config) => {
+      let authToken: string | null = null;
+
+      if (isSignedIn) {
+        const template = import.meta.env.VITE_CLERK_JWT_TEMPLATE as string | undefined;
+        authToken = template ? await getToken({ template }) : await getToken();
+      } else if (legacyToken) {
+        authToken = legacyToken;
+      }
+
+      if (authToken) {
+        config.headers = config.headers ?? {};
+        config.headers.Authorization = `Bearer ${authToken}`;
+      }
+      return config;
+    });
+
+    return () => {
+      api.interceptors.request.eject(interceptorId);
+    };
+  }, [isLoaded, isSignedIn, getToken, legacyToken]);
 
   useEffect(() => {
-    const initAuth = async () => {
-      const storedToken = localStorage.getItem('token');
-      if (storedToken) {
-        try {
-          const response = await api.get('/me');
-          setUser(response.data);
-        } catch (error) {
-          localStorage.removeItem('token');
-          setToken(null);
-          setUser(null);
-        }
+    if (!legacyToken) return;
+
+    (async () => {
+      try {
+        const res = await api.get('/me', {
+          headers: { Authorization: `Bearer ${legacyToken}` },
+        });
+        setLegacyUser({
+          id: res.data.userId,
+          username: res.data.username,
+          createdAt: res.data.createdAt,
+        });
+      } catch {
+        localStorage.removeItem('token');
+        setLegacyToken(null);
+        setLegacyUser(null);
       }
-      setLoading(false);
-    };
+    })();
+  }, [legacyToken]);
 
-    initAuth();
-  }, []);
-
-  const login = async (username: string, password: string) => {
-    const response = await api.post('/signin', { username, password });
-    const { token, user } = response.data;
-
-    localStorage.setItem('token', token);
-    setToken(token);
-    setUser(user);
-  };
-
-  const signup = async (username: string, password: string) => {
-    const response = await api.post('/signup', { username, password });
-    const { token, user } = response.data;
-
-    localStorage.setItem('token', token);
-    setToken(token);
-    setUser(user);
-  };
-
-  const logout = () => {
+  const logout = async () => {
+    if (isClerkAuthed) {
+      await signOut();
+    }
     localStorage.removeItem('token');
-    setToken(null);
-    setUser(null);
+    setLegacyToken(null);
+    setLegacyUser(null);
+    setTelegramInfo({});
   };
 
   const updateTelegramInfo = (chatId: string, username: string) => {
-    setUser(prev => prev ? { ...prev, telegramChatId: chatId, telegramUsername: username } : null);
+    setTelegramInfo({ telegramChatId: chatId, telegramUsername: username });
   };
 
-  if (loading) {
+  const legacySignIn = async (usernameOrEmail: string, password: string) => {
+    const res = await api.post('/signin', { username: usernameOrEmail, password });
+    const nextToken = res.data.token as string;
+    localStorage.setItem('token', nextToken);
+    setLegacyToken(nextToken);
+    setLegacyUser(res.data.user ? { id: res.data.user.id, username: res.data.user.username } : null);
+  };
+
+  const legacySignUp = async (usernameOrEmail: string, password: string) => {
+    const res = await api.post('/signup', { username: usernameOrEmail, password });
+    const nextToken = res.data.token as string;
+    localStorage.setItem('token', nextToken);
+    setLegacyToken(nextToken);
+    setLegacyUser(res.data.user ? { id: res.data.user.id, username: res.data.user.username } : null);
+  };
+
+  if (!isLoaded) {
     return (
       <div className="min-h-screen bg-linear-to-br from-gray-50 to-white flex items-center justify-center">
         <div className="text-center">
@@ -2348,8 +2393,8 @@ const App: React.FC = () => {
   }
 
   return (
-    <AuthContext.Provider value={{ token, user, login, signup, logout, updateTelegramInfo }}>
-      {token ? <Dashboard /> : <AuthForm />}
+    <AuthContext.Provider value={{ user, logout, updateTelegramInfo, legacySignIn, legacySignUp }}>
+      {(isClerkAuthed || isLegacyAuthed) ? <Dashboard /> : <AuthForm />}
     </AuthContext.Provider>
   );
 };

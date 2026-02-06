@@ -9,6 +9,7 @@ import fs from 'fs';
 import  os from 'os';
 import path from 'path';
 import mongoose from 'mongoose';
+import { clerkMiddleware, getAuth } from '@clerk/express';
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { QdrantClient } from "@qdrant/js-client-rest";
@@ -31,6 +32,7 @@ const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 const MONGODB_URI = process.env.MONGODB_URI!;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_CHAT_IDS = process.env.TELEGRAM_CHAT_IDS?.split(',').map(id => id.trim()) || [];
+const CLERK_ENABLED = Boolean(process.env.CLERK_SECRET_KEY);
 
 
 // MongoDB Connection
@@ -841,22 +843,40 @@ const telegramBot = new TelegramReminderBot();
 const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
 
-  if (!authHeader?.startsWith('Bearer ')) {
-    res.status(401).json({ message: 'Authentication required' });
-    return;
+  // 1) Legacy JWT (our existing auth)
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyToken(token!);
+
+    if (decoded) {
+      req.userId = decoded.userId;
+      req.username = decoded.username;
+      next();
+      return;
+    }
   }
 
-  const token = authHeader.split(' ')[1];
-  const decoded = verifyToken(token!);
-
-  if (!decoded) {
-    res.status(401).json({ message: 'Invalid token' });
-    return;
+  // 2) Clerk (optional) - only if CLERK_SECRET_KEY is configured
+  if (CLERK_ENABLED) {
+    const auth = getAuth(req);
+    if (auth.userId) {
+      req.userId = auth.userId;
+      // Best-effort username (may be empty depending on Clerk configuration)
+      const claims = auth.sessionClaims as Record<string, unknown> | null | undefined;
+      const maybeUsername =
+        (claims && typeof claims['username'] === 'string' ? claims['username'] : undefined) ||
+        (claims && typeof claims['email'] === 'string' ? claims['email'] : undefined) ||
+        (claims && typeof claims['primary_email_address'] === 'string' ? claims['primary_email_address'] : undefined) ||
+        (claims && typeof claims['sub'] === 'string' ? claims['sub'] : undefined);
+      if (typeof maybeUsername === 'string') {
+        req.username = maybeUsername;
+      }
+      next();
+      return;
+    }
   }
 
-  req.userId = decoded.userId;
-  req.username = decoded.username;
-  next();
+  res.status(401).json({ message: 'Authentication required' });
 };
 
 
@@ -879,7 +899,17 @@ const textSplitter = new RecursiveCharacterTextSplitter({
 
 // ============ EXPRESS SETUP ============
 const app = express();
-app.use(cors());
+if (CLERK_ENABLED) {
+  app.use(clerkMiddleware({
+    // Local dev machines often drift; tolerate a bit more than default 5s.
+    clockSkewInMs: 2 * 60 * 1000,
+  }));
+}
+app.use(cors({
+  origin: ['http://localhost:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
 
 // File upload setup
