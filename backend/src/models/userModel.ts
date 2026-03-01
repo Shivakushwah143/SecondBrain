@@ -10,6 +10,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
    telegramChatId: { type: String, unique: true, sparse: true }, // Add this
+  telegramUserId: { type: String, unique: true, sparse: true },
   telegramUsername: { type: String }, // Add this
 });
 export const User = mongoose.model('User', userSchema);
@@ -21,7 +22,7 @@ const contentSchema = new mongoose.Schema({
   title: { type: String, required: true },
   link: { type: String, required: true },
   type: { type: String, enum: ['youtube', 'twitter', 'pdf'], required: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  userId: { type: String, required: true },
   tags: [{ type: String }],
   createdAt: { type: Date, default: Date.now }
 });
@@ -32,7 +33,7 @@ export const Content = mongoose.model('Content', contentSchema);
 const pdfCollectionSchema = new mongoose.Schema({
   name: { type: String, required: true },
   originalName: { type: String, required: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  userId: { type: String, required: true },
   uploadDate: { type: Date, default: Date.now },
   chunks: { type: Number, required: true },
   vectorCollectionName: { type: String, required: true }
@@ -43,7 +44,7 @@ export const PDFCollection = mongoose.model('PDFCollection', pdfCollectionSchema
 // Share Link Schema
 const shareLinkSchema = new mongoose.Schema({
   hash: { type: String, required: true, unique: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  userId: { type: String, required: true },
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });
@@ -51,7 +52,7 @@ const shareLinkSchema = new mongoose.Schema({
 export const ShareLink = mongoose.model('ShareLink', shareLinkSchema);
 // Reminder Schema
 const reminderSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  userId: { type: String, required: true },
   title: { type: String, required: true },
   description: { type: String },
   reminderTime: { type: Date, required: true },

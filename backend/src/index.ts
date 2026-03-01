@@ -19,6 +19,9 @@ import Groq from 'groq-sdk';
 import TelegramBot from 'node-telegram-bot-api';
 import schedule from 'node-schedule';
 import { Content, PDFCollection, Reminder, ShareLink, User } from './models/userModel.js';
+import { TelegramLinkCode } from './models/telegramLinkCode.js';
+import { NotionConnection } from './models/notionConnection.js';
+import { exchangeCodeForToken, generateAuthorizationUrl } from './services/notionService.js';
 
 dotenv.config();
 
@@ -214,20 +217,79 @@ class TelegramReminderBot {
   private setupHandlers() {
     if (!this.bot) return;
 
-    // Start command
-    this.bot.onText(/\/start/, async (msg: any) => {
+    // Start command (supports deep-link /start <code>)
+    this.bot.onText(/\/start(?:\s+(.+))?/, async (msg: any, match: any) => {
       const chatId = msg.chat.id;
       const username = msg.from?.username || msg.from?.first_name;
-      
-      await this.sendMessage(chatId, 
-        `✨ **Welcome to Cosmic Mind, ${username}!**\n\n` +
+      const telegramUserId = msg.from?.id?.toString();
+      const code = match && match[1] ? String(match[1]).trim() : '';
+
+      if (code) {
+        try {
+          const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+          const record = await TelegramLinkCode.findOne({ codeHash });
+
+          if (!record) {
+            await this.sendMessage(chatId, '❌ This link is invalid or expired. Please reconnect from the app.');
+            return;
+          }
+
+          if (record.usedAt) {
+            await this.sendMessage(chatId, '❌ This link has already been used. Please generate a new one.');
+            return;
+          }
+
+          if (record.expiresAt.getTime() < Date.now()) {
+            await this.sendMessage(chatId, '❌ This link has expired. Please generate a new one.');
+            return;
+          }
+
+          if (!telegramUserId) {
+            await this.sendMessage(chatId, '❌ Unable to read your Telegram user ID.');
+            return;
+          }
+
+          const existingUser = await User.findOne({ telegramUserId });
+          if (existingUser && existingUser._id.toString() !== record.userId) {
+            await this.sendMessage(chatId, '❌ This Telegram account is already linked to another user.');
+            return;
+          }
+
+          await TelegramLinkCode.findByIdAndUpdate(record._id, {
+            usedAt: new Date(),
+            usedByTelegramUserId: telegramUserId
+          });
+
+          await User.findByIdAndUpdate(record.userId, {
+            telegramChatId: chatId.toString(),
+            telegramUserId,
+            telegramUsername: msg.from?.username
+          });
+
+          await this.sendMessage(chatId,
+            `✅ **Connected, ${username}!**\n\n` +
+            'Your Telegram is now linked to your Second Brain account.\n\n' +
+            'You can now:\n' +
+            '• Save YouTube/Twitter links with `/addcontent`\n' +
+            '• View saved content with `/mycontent`\n' +
+            '• Set reminders for important content'
+          );
+          return;
+        } catch (error) {
+          await this.sendMessage(chatId, '❌ Linking failed. Please try again from the app.');
+          return;
+        }
+      }
+
+      await this.sendMessage(chatId,
+        `✨ **Welcome to Second Brain, ${username}!**\n\n` +
         'I help you save and organize your content.\n\n' +
         '📱 **Quick Start:**\n' +
-        '1. First, link your account: `/link YOUR_TOKEN`\n' +
+        '1. Link your account from the web app\n' +
         '2. Then save content using `/addcontent`\n\n' +
         '💡 **Try these commands:**\n' +
         '• /addcontent - Save YouTube/Twitter links\n' +
-        '• /mycontent - View your saved content\n' +
+        '• /mycontent - View your saved items\n' +
         '• /help - See all commands'
       );
     });
@@ -238,7 +300,7 @@ class TelegramReminderBot {
       await this.sendMessage(chatId,
         '📱 **Available Commands:**\n\n' +
         '🔗 **Account:**\n' +
-        '/link <token> - Link your account\n' +
+        'Connect your account in the web app\n' +
         '/status - Check bot status\n\n' +
         '🎵 **Content Management:**\n' +
         '/addcontent - Save content (with title & tags)\n' +
@@ -273,7 +335,7 @@ class TelegramReminderBot {
         if (data.success) {
           await this.sendMessage(chatId,
             `✅ **Welcome ${data.username}!**\n\n` +
-            'Your Cosmic Mind account is now linked with Telegram!\n\n' +
+            'Your Second Brain account is now linked with Telegram!\n\n' +
             '🎯 **Now you can:**\n' +
             '• Save YouTube/Twitter links with `/addcontent`\n' +
             '• View saved content with `/mycontent`\n' +
@@ -284,7 +346,7 @@ class TelegramReminderBot {
           await this.sendMessage(chatId,
             '❌ **Linking Failed**\n\n' +
             `Error: ${data.message}\n\n` +
-            'Get your token from Cosmic Mind web app → Profile section.'
+            'Connect from the Second Brain web app.'
           );
         }
       } catch (error) {
@@ -569,7 +631,7 @@ class TelegramReminderBot {
             '❌ **Account Not Linked**\n\n' +
             'Please link your account first:\n' +
             '1. Get token from web app → Profile\n' +
-            '2. Use: `/link YOUR_TOKEN`'
+            '2. Use the Connect Telegram button in the web app'
           );
         }
       } catch (error) {
@@ -586,7 +648,7 @@ class TelegramReminderBot {
         '🤖 Bot: ✅ Online\n' +
         '✨ Features: Content Saving, Reminders\n\n' +
         '🔗 **Get Started:**\n' +
-        '1. Link account: `/link <token>`\n' +
+        '1. Connect in the web app\n' +
         '2. Save content: `/addcontent`\n\n' +
         '💡 **Quick Save:**\n' +
         'Just send any YouTube/Twitter link!'
@@ -679,7 +741,7 @@ class TelegramReminderBot {
         await this.sendMessage(chatId,
           '❌ **Failed to Save**\n\n' +
           `Error: ${data.message}\n\n` +
-          'Make sure your account is linked (`/link <token>`).'
+          'Make sure your account is linked from the web app.'
         );
       }
     } catch (error) {
@@ -744,7 +806,7 @@ private async saveContentFromTelegram(chatId: number, contentData: any) {
         `❌ Failed to Save Content\n\n` +
         `Error: ${data.message}\n\n` +
         `Make sure:\n` +
-        `1. Your account is linked (/link <token>)\n` +
+        `1. Your account is linked\n` +
         `2. The URL is valid\n` +
         `3. Try again with /addcontent`
       );
@@ -1027,6 +1089,62 @@ app.get('/api/v1/me', authMiddleware, async (req, res) => {
   }
 });
 
+// ============ NOTION OAUTH ============
+app.get('/api/notion/connect', async (req, res) => {
+  try {
+    const auth = getAuth(req);
+    if (!auth.userId) {
+      res.status(401).json({ message: 'Authentication required' });
+      return;
+    }
+
+    const authorizationUrl = generateAuthorizationUrl();
+    res.redirect(authorizationUrl);
+  } catch (error) {
+    console.error('Notion connect error:', error);
+    res.status(500).json({
+      message: error instanceof Error ? error.message : 'Failed to initiate Notion OAuth'
+    });
+  }
+});
+
+app.get('/api/notion/callback', async (req, res) => {
+  try {
+    const auth = getAuth(req);
+    if (!auth.userId) {
+      res.status(401).json({ message: 'Authentication required' });
+      return;
+    }
+
+    const code = req.query.code;
+    if (!code || typeof code !== 'string') {
+      res.status(400).json({ message: 'Authorization code is required' });
+      return;
+    }
+
+    const token = await exchangeCodeForToken(code);
+
+    await NotionConnection.findOneAndUpdate(
+      { userId: auth.userId },
+      {
+        userId: auth.userId,
+        accessToken: token.access_token,
+        workspaceId: token.workspace_id,
+        workspaceName: token.workspace_name,
+        connectedAt: new Date()
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    const dashboardUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(dashboardUrl);
+  } catch (error) {
+    console.error('Notion callback error:', error);
+    res.status(500).json({
+      message: error instanceof Error ? error.message : 'Failed to connect Notion'
+    });
+  }
+});
 // 🎵 CONTENT MANAGEMENT (UNCHANGED)
 app.post('/api/v1/content', authMiddleware, async (req, res) => {
   try {
@@ -1737,6 +1855,46 @@ app.put('/api/v1/reminders/:id/toggle', authMiddleware, async (req, res) => {
 
 // ============ TELEGRAM INTEGRATION ENDPOINTS ===========
 
+// Generate short-lived deep-link code and return or redirect to Telegram bot
+app.get('/api/v1/telegram/link/start', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId!;
+
+    const code = crypto.randomBytes(24).toString('hex');
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await TelegramLinkCode.findOneAndUpdate(
+      { userId },
+      {
+        userId,
+        codeHash,
+        expiresAt,
+        usedAt: null,
+        usedByTelegramUserId: null
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    const telegramBotUsername = 'SecondBrainBot';
+    const deepLinkUrl = `https://t.me/${telegramBotUsername}?start=${encodeURIComponent(code)}`;
+    const wantsJson =
+      req.query.format === 'json' ||
+      req.headers.accept?.includes('application/json') ||
+      req.headers['x-requested-with'] === 'XMLHttpRequest';
+
+    if (wantsJson) {
+      res.json({ url: deepLinkUrl, expiresAt: expiresAt.toISOString() });
+      return;
+    }
+
+    res.redirect(deepLinkUrl);
+  } catch (error) {
+    console.error('Telegram deep-link error:', error);
+    res.status(500).json({ message: 'Failed to generate Telegram link' });
+  }
+});
+
 // Link Telegram account with Cosmic Mind account
 app.post('/api/v1/telegram/link', async (req, res) => {
   try {
@@ -1821,7 +1979,7 @@ app.post('/api/v1/telegram/content', async (req, res) => {
     if (!user) {
       return res.status(404).json({ 
         success: false, 
-        message: 'Please link your account first. Use /link command.' 
+        message: 'Please connect your account from the web app.' 
       });
     }
 
@@ -2141,3 +2299,7 @@ app.listen(PORT, () => {
 
 // Export for testing
 export default app;
+
+
+
+
