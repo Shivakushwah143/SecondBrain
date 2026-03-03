@@ -8,6 +8,7 @@ import cors from 'cors';
 import fs from 'fs';
 import  os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import { clerkMiddleware, getAuth } from '@clerk/express';
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
@@ -23,7 +24,19 @@ import { TelegramLinkCode } from './models/telegramLinkCode.js';
 import { NotionConnection } from './models/notionConnection.js';
 import { exchangeCodeForToken, generateAuthorizationUrl } from './services/notionService.js';
 
-dotenv.config();
+// Load .env from common locations (root run vs backend run)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dotenvCandidates = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(__dirname, '../.env')
+];
+for (const candidate of dotenvCandidates) {
+  if (fs.existsSync(candidate)) {
+    dotenv.config({ path: candidate });
+    break;
+  }
+}
 
 const reminderScheduledJobs: { [key: string]: schedule.Job } = {};
 // Environment variables - REMOVED Gemini, ADDED Groq
@@ -36,6 +49,9 @@ const MONGODB_URI = process.env.MONGODB_URI!;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_CHAT_IDS = process.env.TELEGRAM_CHAT_IDS?.split(',').map(id => id.trim()) || [];
 const CLERK_ENABLED = Boolean(process.env.CLERK_SECRET_KEY);
+
+const buildUserQuery = (userId: string) =>
+  mongoose.isValidObjectId(userId) ? { _id: userId } : { clerkId: userId };
 
 
 // MongoDB Connection
@@ -93,10 +109,10 @@ const getGroqResponse = async (prompt: string, context?: string) => {
   try {
     // Try different Groq models in order
     const modelsToTry = [
-      'llama-3.1-70b-versatile',    // Latest Llama 3.1 70B
-      'llama-3.1-8b-instant',       // Fast 8B model
-      'mixtral-8x7b-32768',         // Mixtral
-      'gemma2-9b-it'                // Gemma 2
+      'llama-3.1-70b-versatile',    
+      'llama-3.1-8b-instant',      
+      'mixtral-8x7b-32768',        
+      'gemma2-9b-it'                
     ];
 
     for (const model of modelsToTry) {
@@ -203,16 +219,7 @@ class TelegramReminderBot {
   }
 }
 
-  // private startBot() {
-  //   try {
-  //     this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-  //     this.setupHandlers();
-  //     this.isActive = true;
-  //     console.log('🤖 Telegram Reminder Bot started');
-  //   } catch (error) {
-  //     console.error('❌ Failed to start Telegram bot:', error);
-  //   }
-  // }
+
 
   private setupHandlers() {
     if (!this.bot) return;
@@ -260,11 +267,18 @@ class TelegramReminderBot {
             usedByTelegramUserId: telegramUserId
           });
 
-          await User.findByIdAndUpdate(record.userId, {
-            telegramChatId: chatId.toString(),
-            telegramUserId,
-            telegramUsername: msg.from?.username
-          });
+          const updatedUser = await User.findOneAndUpdate(
+            buildUserQuery(record.userId),
+            {
+              telegramChatId: chatId.toString(),
+              telegramUserId,
+              telegramUsername: msg.from?.username
+            }
+          );
+          if (!updatedUser) {
+            await this.sendMessage(chatId, '❌ User account not found. Please reconnect from the app.');
+            return;
+          }
 
           await this.sendMessage(chatId,
             `✅ **Connected, ${username}!**\n\n` +
@@ -882,22 +896,6 @@ private async saveContentFromTelegram(chatId: number, contentData: any) {
     }
   }
 }
-
-//   // Send notification to all users
-//   async sendNotification(message: string) {
-//     if (!this.bot || !this.isActive || TELEGRAM_CHAT_IDS.length === 0) return;
-    
-//     for (const chatId of TELEGRAM_CHAT_IDS) {
-//       try {
-//         await this.sendMessage(chatId, `🔔 ${message}`);
-//       } catch (error) {
-//         console.error(`Failed to send to ${chatId}:`, error);
-//       }
-//     }
-//   }
-// }
-
-
 // Create bot instance
 const telegramBot = new TelegramReminderBot();
 
@@ -940,7 +938,6 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
 
   res.status(401).json({ message: 'Authentication required' });
 };
-
 
 
 // Extend Express Request type
@@ -1072,7 +1069,7 @@ app.post('/api/v1/signin', async (req, res) => {
 
 app.get('/api/v1/me', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select('-password');
+    const user = await User.findOne(buildUserQuery(req.userId!)).select('-password');
     if (!user) {
       res.status(404).json({ message: 'User not found' });
       return;
@@ -1876,7 +1873,7 @@ app.get('/api/v1/telegram/link/start', authMiddleware, async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    const telegramBotUsername = 'SecondBrainBot';
+    const telegramBotUsername = 'secondb121_bot';
     const deepLinkUrl = `https://t.me/${telegramBotUsername}?start=${encodeURIComponent(code)}`;
     const wantsJson =
       req.query.format === 'json' ||
@@ -1892,6 +1889,32 @@ app.get('/api/v1/telegram/link/start', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Telegram deep-link error:', error);
     res.status(500).json({ message: 'Failed to generate Telegram link' });
+  }
+});
+
+// Get Telegram connection status for current user
+app.get('/api/v1/telegram/status', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const user = await User.findOne(buildUserQuery(userId)).select('telegramChatId telegramUsername');
+
+    if (!user) {
+      res.json({
+        linked: false,
+        telegramChatId: '',
+        telegramUsername: ''
+      });
+      return;
+    }
+
+    res.json({
+      linked: Boolean(user.telegramChatId),
+      telegramChatId: user.telegramChatId || '',
+      telegramUsername: user.telegramUsername || ''
+    });
+  } catch (error) {
+    console.error('Telegram status error:', error);
+    res.status(500).json({ message: 'Failed to fetch Telegram status' });
   }
 });
 
@@ -2258,7 +2281,6 @@ function scheduleReminder(reminder: any) {
     console.error(`❌ Error scheduling reminder "${reminder.title}":`, error);
   }
 }
-
 
 // 🏥 HEALTH CHECK
 app.get('/api/v1/health', async (req, res) => {

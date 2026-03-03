@@ -4,11 +4,8 @@ type NotionTokenResponse = {
   workspace_name: string;
 };
 
-const NOTION_CLIENT_ID = process.env.NOTION_CLIENT_ID;
-const NOTION_CLIENT_SECRET = process.env.NOTION_CLIENT_SECRET;
-const NOTION_REDIRECT_URI = process.env.NOTION_REDIRECT_URI;
-
-const requireNotionEnv = (name: string, value?: string): string => {
+const requireNotionEnv = (name: string): string => {
+  const value = process.env[name];
   if (!value) {
     throw new Error(`${name} is not configured`);
   }
@@ -16,9 +13,8 @@ const requireNotionEnv = (name: string, value?: string): string => {
 };
 
 export const generateAuthorizationUrl = (): string => {
-  const clientId = requireNotionEnv('NOTION_CLIENT_ID', NOTION_CLIENT_ID);
-  const redirectUri = requireNotionEnv('NOTION_REDIRECT_URI', NOTION_REDIRECT_URI);
-
+  const clientId = requireNotionEnv('NOTION_CLIENT_ID');
+  const redirectUri = requireNotionEnv('NOTION_REDIRECT_URI');
   const url = new URL('https://api.notion.com/v1/oauth/authorize');
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('response_type', 'code');
@@ -33,9 +29,9 @@ export const exchangeCodeForToken = async (code: string): Promise<NotionTokenRes
     throw new Error('Authorization code is required');
   }
 
-  const clientId = requireNotionEnv('NOTION_CLIENT_ID', NOTION_CLIENT_ID);
-  const clientSecret = requireNotionEnv('NOTION_CLIENT_SECRET', NOTION_CLIENT_SECRET);
-  const redirectUri = requireNotionEnv('NOTION_REDIRECT_URI', NOTION_REDIRECT_URI);
+  const clientId = requireNotionEnv('NOTION_CLIENT_ID');
+  const clientSecret = requireNotionEnv('NOTION_CLIENT_SECRET');
+  const redirectUri = requireNotionEnv('NOTION_REDIRECT_URI');
 
   const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
