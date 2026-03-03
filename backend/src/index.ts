@@ -53,6 +53,29 @@ const CLERK_ENABLED = Boolean(process.env.CLERK_SECRET_KEY);
 const buildUserQuery = (userId: string) =>
   mongoose.isValidObjectId(userId) ? { _id: userId } : { clerkId: userId };
 
+const ensureAppUser = async (userId: string, usernameHint?: string) => {
+  const existing = await User.findOne(buildUserQuery(userId));
+  if (existing) return existing;
+
+  const raw = (usernameHint || 'user').toString();
+  const base = raw.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 20) || 'user';
+  let username = base;
+
+  const taken = await User.findOne({ username });
+  if (taken) {
+    const suffix = userId.slice(-6);
+    username = `${base}_${suffix}`;
+  }
+
+  const newUser = new User({
+    username,
+    ...(mongoose.isValidObjectId(userId) ? {} : { clerkId: userId })
+  });
+
+  await newUser.save();
+  return newUser;
+};
+
 
 // MongoDB Connection
 mongoose.connect(MONGODB_URI)
@@ -1142,6 +1165,21 @@ app.get('/api/notion/callback', async (req, res) => {
     });
   }
 });
+
+app.get('/api/v1/notion/status', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const connection = await NotionConnection.findOne({ userId }).select('workspaceName connectedAt');
+    res.json({
+      connected: Boolean(connection),
+      workspaceName: connection?.workspaceName || '',
+      connectedAt: connection?.connectedAt || null
+    });
+  } catch (error) {
+    console.error('Notion status error:', error);
+    res.status(500).json({ message: 'Failed to fetch Notion status' });
+  }
+});
 // 🎵 CONTENT MANAGEMENT (UNCHANGED)
 app.post('/api/v1/content', authMiddleware, async (req, res) => {
   try {
@@ -1856,6 +1894,8 @@ app.put('/api/v1/reminders/:id/toggle', authMiddleware, async (req, res) => {
 app.get('/api/v1/telegram/link/start', authMiddleware, async (req, res) => {
   try {
     const userId = req.userId!;
+
+    await ensureAppUser(userId, req.username);
 
     const code = crypto.randomBytes(24).toString('hex');
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');

@@ -1,5 +1,6 @@
 ﻿import React, { useRef, useState } from "react";
-import { FiCheck, FiCopy, FiLink, FiShare2, FiX } from "react-icons/fi";
+import { FiCheck, FiCopy, FiLink, FiMail, FiShare2, FiX } from "react-icons/fi";
+import { SiTelegram, SiWhatsapp, SiX, SiLinkedin } from "react-icons/si";
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -97,6 +98,57 @@ const ShareModal: React.FC<ShareModalProps> = ({
               <div className="flex items-center space-x-2 text-sm text-[#A46A3B] bg-[#F3EEE7] dark:bg-[#1B1F2A] p-3 rounded-lg">
                 <FiLink className="w-4 h-4 flex-shrink-0" />
                 <span>Share link is now active</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(shareLink)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#D0C0AE] bg-[#E7DED2] px-4 py-2 text-sm font-medium text-[#323845] hover:border-[#B35A3C]/40 hover:opacity-90 transition-all"
+                  aria-label="Share on WhatsApp"
+                >
+                  <SiWhatsapp className="h-4 w-4 text-[#25D366]" />
+                  WhatsApp
+                </a>
+                <a
+                  href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(shareLink)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#D0C0AE] bg-[#E7DED2] px-4 py-2 text-sm font-medium text-[#323845] hover:border-[#B35A3C]/40 hover:opacity-90 transition-all"
+                  aria-label="Share on X"
+                >
+                  <SiX className="h-4 w-4" />
+                  X
+                </a>
+                <a
+                  href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareLink)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#D0C0AE] bg-[#E7DED2] px-4 py-2 text-sm font-medium text-[#323845] hover:border-[#B35A3C]/40 hover:opacity-90 transition-all"
+                  aria-label="Share on LinkedIn"
+                >
+                  <SiLinkedin className="h-4 w-4 text-[#0A66C2]" />
+                  LinkedIn
+                </a>
+                <a
+                  href={`https://t.me/share/url?url=${encodeURIComponent(shareLink)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#D0C0AE] bg-[#E7DED2] px-4 py-2 text-sm font-medium text-[#323845] hover:border-[#B35A3C]/40 hover:opacity-90 transition-all"
+                  aria-label="Share on Telegram"
+                >
+                  <SiTelegram className="h-4 w-4 text-[#229ED9]" />
+                  Telegram
+                </a>
+                <a
+                  href={`mailto:?subject=${encodeURIComponent('Second Brain Share')}&body=${encodeURIComponent(shareLink)}`}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#D0C0AE] bg-[#E7DED2] px-4 py-2 text-sm font-medium text-[#323845] hover:border-[#B35A3C]/40 hover:opacity-90 transition-all"
+                  aria-label="Share via Email"
+                >
+                  <FiMail className="h-4 w-4" />
+                  Email
+                </a>
               </div>
 
               <div className="space-y-3">

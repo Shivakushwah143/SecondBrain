@@ -15,19 +15,19 @@ import {
   FiHome,
   FiList,
   FiLogOut,
-  FiMoon,
   FiMenu,
   FiMessageSquare,
   FiPlus,
   FiSearch,
   FiShare2,
+  FiSun,
   FiTarget,
   FiTrash2,
   FiTrendingUp,
   FiUpload,
-  FiSun,
+  FiX,
+  FiMoon,
   FiZap,
-  FiX as FiXIcon,
 } from 'react-icons/fi';
 import {
   SiAdobeacrobatreader,
@@ -48,7 +48,6 @@ import { API_BASE_URL, api, getErrorMessage } from '../lib/api';
 import { formatDate, formatTime } from '../lib/format';
 import type {
   Captures,
-  OverviewTab,
   NewReminder,
   PDFCollection,
   Reminder,
@@ -59,9 +58,52 @@ import type {
 import ReminderModal from './modals/ReminderModal';
 import ShareModal from './modals/ShareModal';
 import TelegramLinkModal from './modals/TelegramLinkModal';
+import DashboardLayout from './DashboardLayout';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+
+type OverviewTab =
+  | 'overview'
+  | 'content'
+  | 'pdf'
+  | 'ai'
+  | 'reminders'
+  | 'telegram'
+  | 'notion'
+  | 'share'
+  | 'dashboard'
+  | 'menu';
 // 2. Overview Component
 const Dashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<OverviewTab>('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const tabToRoute: Partial<Record<OverviewTab, string>> = {
+    overview: '/overview',
+    dashboard: '/overview',
+    content: '/captures',
+    pdf: '/libraries',
+    ai: '/ask',
+    reminders: '/reminders',
+    telegram: '/telegram',
+    notion: '/notion',
+    share: '/share',
+  };
+  const routeToTab: Record<string, OverviewTab> = {
+    '/overview': 'overview',
+    '/captures': 'content',
+    '/libraries': 'pdf',
+    '/ask': 'ai',
+    '/reminders': 'reminders',
+    '/telegram': 'telegram',
+    '/notion': 'notion',
+    '/share': 'share',
+  };
+  const activeTab = routeToTab[location.pathname] ?? 'overview';
+  const setActiveTab = (tab: OverviewTab) => {
+    const nextRoute = tabToRoute[tab];
+    if (nextRoute && nextRoute !== location.pathname) {
+      navigate(nextRoute);
+    }
+  };
   const [Captures, setCaptures] = useState<Captures[]>([]);
   const [collections, setCollections] = useState<PDFCollection[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -91,9 +133,9 @@ const Dashboard: React.FC = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState('');
   const [isSharing, setIsSharing] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Telegram Reminders State
   const [showReminderModal, setShowReminderModal] = useState(false);
@@ -101,6 +143,11 @@ const Dashboard: React.FC = () => {
   const [isLinkingTelegram, setIsLinkingTelegram] = useState(false);
   const [isConnectingNotion, setIsConnectingNotion] = useState(false);
   const [telegramBotStatus, setTelegramBotStatus] = useState<TelegramBotStatus>({ isActive: false });
+  const [showTelegramLinkedBanner, setShowTelegramLinkedBanner] = useState(false);
+  const [notionStatus, setNotionStatus] = useState<{ connected: boolean; workspaceName: string }>({
+    connected: false,
+    workspaceName: ''
+  });
   const [newReminder, setNewReminder] = useState({
     title: '',
     description: '',
@@ -116,6 +163,8 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     fetchData();
     checkTelegramBotStatus();
+    fetchTelegramStatus();
+    fetchNotionStatus();
   }, []);
 
   const fetchData = async () => {
@@ -149,6 +198,22 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const fetchTelegramStatus = async () => {
+    try {
+      const response = await api.get('/telegram/status');
+      if (auth && response.data?.linked) {
+        auth.updateTelegramInfo(response.data.telegramChatId, response.data.telegramUsername || '');
+      }
+      const pending = localStorage.getItem('telegram_link_pending');
+      if (pending && response.data?.linked) {
+        setShowTelegramLinkedBanner(true);
+        localStorage.removeItem('telegram_link_pending');
+      }
+    } catch (error) {
+      console.error('Failed to fetch Telegram status:', error);
+    }
+  };
+
   const checkTelegramBotStatus = async () => {
     try {
       const response = await api.get('/health');
@@ -157,6 +222,18 @@ const Dashboard: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to check Telegram bot status:', error);
+    }
+  };
+
+  const fetchNotionStatus = async () => {
+    try {
+      const response = await api.get('/notion/status');
+      setNotionStatus({
+        connected: Boolean(response.data?.connected),
+        workspaceName: response.data?.workspaceName || ''
+      });
+    } catch (error) {
+      console.error('Failed to fetch Notion status:', error);
     }
   };
 
@@ -331,7 +408,8 @@ const Dashboard: React.FC = () => {
       const reminderTime = new Date(newReminder.reminderTime).toISOString();
       const response = await api.post('/reminders', {
         ...newReminder,
-        reminderTime
+        reminderTime,
+        telegramChatId: auth?.user?.telegramChatId || ''
       });
 
       const created = response.data.reminder;
@@ -345,8 +423,7 @@ const Dashboard: React.FC = () => {
         title: '',
         description: '',
         reminderTime: '',
-        repeat: 'once',
-        telegramChatId: ''
+        repeat: 'once'
       });
       setShowReminderModal(false);
 
@@ -398,6 +475,7 @@ const Dashboard: React.FC = () => {
         throw new Error('Missing Telegram link');
       }
 
+      localStorage.setItem('telegram_link_pending', '1');
       window.location.href = url;
       setShowTelegramLinkModal(false);
     } catch (error: unknown) {
@@ -462,25 +540,25 @@ const Dashboard: React.FC = () => {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-[#FBF7F1] dark:bg-[#141821]/90 backdrop-blur-md border-b border-[#D0C0AE] dark:border-[#2A3442] shadow-sm">
         <div className="mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+          <div className="flex justify-between items-center h-14 md:h-16 gap-2">
             {/* Logo */}
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-[#E7DED2] dark:bg-[#1B1F2A] rounded-xl flex items-center justify-center shadow-lg">
-                <FiDatabase className="w-6 h-6 text-white" />
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 bg-[#E7DED2] dark:bg-[#1B1F2A] rounded-lg flex items-center justify-center shadow-sm">
+                <FiDatabase className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold bg-[#B35A3C] dark:bg-[#1E5A58] bg-clip-text text-transparent">
+                <h1 className="text-base sm:text-xl font-bold bg-[#B35A3C] dark:bg-[#1E5A58] bg-clip-text text-transparent">
                   Second Brain
                 </h1>
-                <p className="text-xs text-[#6B7481] dark:text-[#8D95A3]">Memory Layer for the Internet</p>
+                <p className="hidden sm:block text-xs text-[#6B7481] dark:text-[#8D95A3]">Memory Layer for the Internet</p>
               </div>
             </div>
 
             {/* Desktop Navigation removed in favor of left rail */}
 
             {/* Right Side Controls */}
-            <div className="flex items-center space-x-4">
-              <div className="relative">
+            <div className="flex items-center gap-2 md:gap-4">
+              <div className="relative hidden md:block">
                 <input
                   type="text"
                   placeholder="Search..."
@@ -495,24 +573,24 @@ const Dashboard: React.FC = () => {
               <button
                 type="button"
                 onClick={() => theme?.toggle()}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#D0C0AE] dark:border-[#2A3442] bg-[#FBF7F1] dark:bg-[#141821] text-[#323845] dark:text-[#C7D0DD] hover:border-[#B35A3C]/40 hover:text-[#161A21] dark:hover:text-[#E9EDF5] transition-colors text-sm font-medium"
+                className="h-9 w-9 md:h-auto md:w-auto md:px-3 md:py-2 rounded-lg border border-[#D0C0AE] dark:border-[#2A3442] bg-[#FBF7F1] dark:bg-[#141821] text-[#323845] dark:text-[#C7D0DD] hover:border-[#B35A3C]/40 hover:text-[#161A21] dark:hover:text-[#E9EDF5] transition-colors text-sm font-medium flex items-center justify-center md:gap-2"
                 aria-label="Toggle theme"
               >
                 {theme?.isDark ? <FiSun className="w-4 h-4" /> : <FiMoon className="w-4 h-4" />}
-                <span>{theme?.isDark ? 'Light' : 'Dark'}</span>
+                <span className="hidden md:inline">{theme?.isDark ? 'Light' : 'Dark'}</span>
               </button>
-              <button className="relative p-2 text-[#515A66] dark:text-[#9AA3B2] hover:text-[#161A21] dark:text-[#E9EDF5] hover:bg-[#E7DED2] dark:bg-[#1B1F2A] rounded-lg">
+              <button className="relative h-9 w-9 rounded-lg text-[#515A66] dark:text-[#9AA3B2] hover:text-[#161A21] dark:text-[#E9EDF5] hover:bg-[#E7DED2] dark:bg-[#1B1F2A] flex items-center justify-center">
                 <FiBell className="w-5 h-5" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
               </button>
 
-              <div className="flex items-center space-x-3">
+              <div className="hidden md:flex items-center gap-3">
                 <div className="w-8 h-8 bg-[#E7DED2] dark:bg-[#1B1F2A] rounded-full flex items-center justify-center text-white font-semibold text-sm">
                   {auth?.user?.username?.charAt(0).toUpperCase()}
                 </div>
                 <button
                   onClick={() => auth?.logout()}
-                  className="px-4 py-2 text-sm font-medium text-[#323845] dark:text-[#C7D0DD] hover:text-[#161A21] dark:text-[#E9EDF5] bg-[#E7DED2] dark:bg-[#1B1F2A] hover:bg-gray-200 rounded-lg transition-colors flex items-center space-x-2"
+                  className="px-3 sm:px-4 py-2 text-sm font-medium text-[#323845] dark:text-[#C7D0DD] hover:text-[#161A21] dark:text-[#E9EDF5] bg-[#E7DED2] dark:bg-[#1B1F2A] hover:bg-gray-200 rounded-lg transition-colors flex items-center space-x-2"
                 >
                   <FiLogOut className="w-4 h-4" />
                   <span>Logout</span>
@@ -524,7 +602,7 @@ const Dashboard: React.FC = () => {
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="md:hidden p-2 rounded-lg text-[#515A66] dark:text-[#9AA3B2] hover:text-[#161A21] dark:text-[#E9EDF5]"
               >
-                {mobileMenuOpen ? <FiXIcon className="w-6 h-6" /> : <FiMenu className="w-6 h-6" />}
+                {mobileMenuOpen ? <FiX className="w-6 h-6" /> : <FiMenu className="w-6 h-6" />}
               </button>
             </div>
           </div>
@@ -564,7 +642,7 @@ const Dashboard: React.FC = () => {
         </div>
       </header>
 
-      <main className="mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-8">
         <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8">
           {/* Left Rail */}
           <aside className="hidden lg:block">
@@ -603,7 +681,7 @@ const Dashboard: React.FC = () => {
                   Capture one meaningful item today. Build a memory you can trust.
                 </p>
                 <button
-                  onClick={() => setActiveTab('content')}
+                  onClick={() => navigate('/captures')}
                   className="mt-4 w-full px-3 py-2 rounded-xl bg-[#B35A3C] dark:bg-[#1E5A58] text-white text-sm font-semibold transition-opacity hover:opacity-90"
                 >
                   New Capture
@@ -692,6 +770,52 @@ const Dashboard: React.FC = () => {
                 </div>
               ))}
             </div>
+
+            {activeTab === 'dashboard' && (
+              <div className="mb-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-[#161A21] dark:text-[#E9EDF5]">Product Highlights</h3>
+                  <span className="text-xs uppercase tracking-[0.2em] text-[#6B7481] dark:text-[#8D95A3]">SaaS Ready</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    {
+                      title: 'Digital Second Brain',
+                      src: '/Digital_Second_Brainf.png'
+                    },
+                    {
+                      title: 'AI Knowledge Graph',
+                      src: '/AI_Knowledge_Graph.png'
+                    },
+                    {
+                      title: 'Multi-Source Capture',
+                      src: '/Multi_Source_Capture.png'
+                    },
+                    {
+                      title: 'AI Chat Over Personal Knowledge',
+                      src: '/AI_Chat_Over_Personal_Knowledgel.png'
+                    }
+                  ].map((item) => (
+                    <div
+                      key={item.title}
+                      className="bg-[#FBF7F1] dark:bg-[#141821] rounded-2xl border border-[#D0C0AE] dark:border-[#2A3442] overflow-hidden shadow-sm"
+                    >
+                      <div className="aspect-[4/3] overflow-hidden bg-[#E7DED2] dark:bg-[#1B1F2A]">
+                        <img
+                          src={item.src}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      </div>
+                      <div className="p-3">
+                        <p className="text-sm font-medium text-[#161A21] dark:text-[#E9EDF5]">{item.title}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Main Captures Area */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1118,10 +1242,17 @@ const Dashboard: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <div>
                         <h2 className="text-lg font-semibold text-[#161A21] dark:text-[#E9EDF5]">Notion Workspace</h2>
-                        <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">Connect Notion to sync and organize</p>
+                        <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">
+                          {notionStatus.connected
+                            ? `Connected${notionStatus.workspaceName ? ` to ${notionStatus.workspaceName}` : ''}`
+                            : 'Connect Notion to sync and organize'}
+                        </p>
                       </div>
-                      <div className="px-3 py-1.5 rounded-full text-xs font-medium bg-[#E7DED2] text-[#7C5A36] border border-[#D0C0AE]">
-                        OAuth
+                      <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${notionStatus.connected
+                        ? 'bg-[#E7DED2] text-[#7C5A36] border border-[#D0C0AE]'
+                        : 'bg-red-100 text-red-700 border border-red-200'
+                        }`}>
+                        {notionStatus.connected ? 'Connected' : 'Not Connected'}
                       </div>
                     </div>
 
@@ -1132,16 +1263,20 @@ const Dashboard: React.FC = () => {
                             <SiNotion className="w-6 h-6 text-white" />
                           </div>
                           <div>
-                            <h3 className="font-semibold text-[#161A21] dark:text-[#E9EDF5]">Connect Workspace</h3>
-                            <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">Authorize your Notion account</p>
+                            <h3 className="font-semibold text-[#161A21] dark:text-[#E9EDF5]">
+                              {notionStatus.connected ? 'Notion Connected' : 'Connect Workspace'}
+                            </h3>
+                            <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">
+                              {notionStatus.connected ? 'Your Notion workspace is linked.' : 'Authorize your Notion account'}
+                            </p>
                           </div>
                         </div>
                         <button
                           onClick={handleConnectNotion}
-                          disabled={isConnectingNotion}
+                          disabled={isConnectingNotion || notionStatus.connected}
                           className="w-full py-3 bg-[#B35A3C] dark:bg-[#1E5A58] text-white font-medium rounded-xl hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {isConnectingNotion ? 'Connecting…' : 'Connect Notion'}
+                          {notionStatus.connected ? 'Connected' : isConnectingNotion ? 'Connecting…' : 'Connect Notion'}
                         </button>
                       </div>
 
@@ -1168,17 +1303,22 @@ const Dashboard: React.FC = () => {
                 {/* Telegram Interface */}
                 {activeTab === 'telegram' && (
                   <div className="space-y-6">
+                    {showTelegramLinkedBanner && (
+                      <div className="rounded-xl border border-[#D0C0AE] bg-[#E7DED2] px-4 py-3 text-sm text-[#323845]">
+                        Telegram account linked successfully.
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <div>
                         <h2 className="text-lg font-semibold text-[#161A21] dark:text-[#E9EDF5]">Telegram Bot</h2>
                         <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">Save Captures directly from Telegram</p>
                       </div>
-                      <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${telegramBotStatus.isActive
+                    <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${auth?.user?.telegramChatId
                         ? 'bg-[#E7DED2] text-[#7C5A36] border border-[#D0C0AE]'
                         : 'bg-red-100 text-red-700 border border-red-200'
                         }`}>
-                        {telegramBotStatus.isActive ? 'Bot Active' : 'Bot Offline'}
-                      </div>
+                        {auth?.user?.telegramChatId ? 'Connected' : 'Not Connected'}
+                    </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1462,9 +1602,9 @@ const Dashboard: React.FC = () => {
                 {/* Shortcuts */}
                 <div className="bg-[#FBF7F1] dark:bg-[#141821] rounded-2xl shadow-sm border border-[#D0C0AE] dark:border-[#2A3442] p-6">
                   <h3 className="font-semibold text-[#161A21] dark:text-[#E9EDF5] mb-4">Shortcuts</h3>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
-                      onClick={() => setActiveTab('content')}
+                      onClick={() => navigate('/captures')}
                       className="p-3 rounded-xl border border-[#D0C0AE] dark:border-[#2A3442] hover:border-[#C7B39C] hover:bg-[#F3EEE7] transition-all flex flex-col items-center justify-center"
                     >
                       <FiPlus className="w-5 h-5 text-[#A46A3B] mb-2" />
@@ -1480,7 +1620,7 @@ const Dashboard: React.FC = () => {
                     </button>
 
                     <button
-                      onClick={() => setActiveTab('reminders')}
+                      onClick={() => navigate('/reminders')}
                       className="p-3 rounded-xl border border-[#D0C0AE] dark:border-[#2A3442] hover:border-[#C7B39C] hover:bg-[#F3EEE7] transition-all flex flex-col items-center justify-center"
                     >
                       <FiBell className="w-5 h-5 text-[#A46A3B] mb-2" />
@@ -1488,7 +1628,7 @@ const Dashboard: React.FC = () => {
                     </button>
 
                     <button
-                      onClick={() => setActiveTab('ai')}
+                      onClick={() => navigate('/ask')}
                       className="p-3 rounded-xl border border-[#D0C0AE] dark:border-[#2A3442] hover:border-[#C7B39C] hover:bg-[#F3EEE7] transition-all flex flex-col items-center justify-center"
                     >
                       <FiMessageSquare className="w-5 h-5 text-[#A46A3B] mb-2" />
@@ -1530,7 +1670,7 @@ const Dashboard: React.FC = () => {
                               file: file,
                               title: prev.title || file.name.replace(/\.[^/.]+$/, "")
                             }));
-                            setActiveTab('content');
+                            navigate('/captures');
                           }
                         }}
                         disabled={uploadingPDF}
@@ -1585,7 +1725,7 @@ const Dashboard: React.FC = () => {
                           className="flex items-center justify-between p-4 bg-[#F3EEE7] dark:bg-[#0E1014] rounded-xl hover:bg-[#E7DED2] dark:bg-[#1B1F2A] transition-colors group cursor-pointer"
                           onClick={() => {
                             setSelectedCollection(collection._id);
-                            setActiveTab('pdf');
+                            navigate('/libraries');
                           }}
                         >
                           <div className="flex items-center space-x-3">
@@ -1614,7 +1754,7 @@ const Dashboard: React.FC = () => {
 
                       {collections.length > 3 && (
                         <button
-                          onClick={() => setActiveTab('pdf')}
+                          onClick={() => navigate('/libraries')}
                           className="w-full text-center text-[#A46A3B] hover:text-[#A46A3B] font-medium text-sm pt-2"
                         >
                           View all {collections.length} collections
@@ -1688,6 +1828,38 @@ const Dashboard: React.FC = () => {
         isLinking={isLinkingTelegram}
         user={auth?.user}
       />
+
+      {/* Mobile Bottom Navigation */}
+      <div className="fixed bottom-0 inset-x-0 md:hidden bg-[#FBF7F1] dark:bg-[#141821]/95 border-t border-[#D0C0AE] dark:border-[#2A3442] backdrop-blur-md">
+        <div className="grid grid-cols-5 gap-1 px-3 py-2">
+          {[
+            { id: 'dashboard', label: 'Home', icon: FiHome },
+            { id: 'content', label: 'Captures', icon: FiBookmark },
+            { id: 'ai', label: 'Ask', icon: FiMessageSquare },
+            { id: 'reminders', label: 'Alerts', icon: FiBell },
+            { id: 'menu', label: 'More', icon: FiMenu }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => {
+                if (tab.id === 'menu') {
+                  setMobileMenuOpen(prev => !prev);
+                  return;
+                }
+                setActiveTab(tab.id as OverviewTab);
+                setMobileMenuOpen(false);
+              }}
+              className={`flex flex-col items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-medium transition-colors ${activeTab === tab.id
+                ? 'text-[#A46A3B]'
+                : 'text-[#6B7481] dark:text-[#9AA3B2]'
+                }`}
+            >
+              <tab.icon className="w-5 h-5" />
+              <span>{tab.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Footer */}
       <footer className="border-t border-[#D0C0AE] dark:border-[#2A3442] bg-[#FBF7F1] dark:bg-[#141821] mt-12">

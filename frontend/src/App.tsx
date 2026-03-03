@@ -1,5 +1,6 @@
-﻿import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type FC } from 'react';
 import { useAuth, useUser } from '@clerk/clerk-react';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthContext } from './context/AuthContext';
 import { ThemeContext, type ThemeMode } from './context/ThemeContext';
 import { api } from './lib/api';
@@ -8,7 +9,7 @@ import AuthForm from './components/AuthForm';
 import Dashboard from './components/Dashboard';
 import LoadingScreen from './components/LoadingScreen';
 
-const App: React.FC = () => {
+const App: FC = () => {
   const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
   const { user: clerkUser } = useUser();
   const [legacyToken, setLegacyToken] = useState<string | null>(() => localStorage.getItem('token'));
@@ -44,10 +45,6 @@ const App: React.FC = () => {
     if (themeMode === 'dark') return true;
     if (themeMode === 'light') return false;
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  }, [themeMode]);
-
-  useEffect(() => {
-    localStorage.setItem('sb-theme', themeMode);
   }, [themeMode]);
 
   useEffect(() => {
@@ -146,7 +143,6 @@ const App: React.FC = () => {
     setLegacyToken(nextToken);
     setLegacyUser(res.data.user ? { id: res.data.user.id, username: res.data.user.username } : null);
   };
-
   if (!isLoaded) {
     return (
       <LoadingScreen
@@ -155,6 +151,7 @@ const App: React.FC = () => {
       />
     );
   }
+  const isAuthed = isClerkAuthed || isLegacyAuthed;
 
   return (
     <ThemeContext.Provider
@@ -166,13 +163,28 @@ const App: React.FC = () => {
       }}
     >
       <AuthContext.Provider value={{ user, logout, updateTelegramInfo, legacySignIn, legacySignUp }}>
-        {(isClerkAuthed || isLegacyAuthed) ? <Dashboard /> : <AuthForm />}
+        <Routes>
+          <Route
+            path="/"
+            element={isAuthed ? <Navigate to="/overview" replace /> : <AuthForm />}
+          />
+          <Route
+            path="/*"
+            element={isAuthed ? <Dashboard /> : <Navigate to="/" replace />}
+          />
+        </Routes>
       </AuthContext.Provider>
     </ThemeContext.Provider>
   );
 };
 
 export default App;
+
+
+
+
+
+
 
 
 

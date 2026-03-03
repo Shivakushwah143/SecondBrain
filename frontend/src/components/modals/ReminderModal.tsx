@@ -45,7 +45,7 @@ const ReminderModal: React.FC<ReminderModalProps> = ({
               type="text"
               value={newReminder.title}
               onChange={(e) => setNewReminder({ ...newReminder, title: e.target.value })}
-              className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent transition-all"
+              className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent transition-all text-[#161A21] dark:text-[#E9EDF5] placeholder:text-[#8D95A3]"
               placeholder="Reminder title"
               required
             />
@@ -58,13 +58,13 @@ const ReminderModal: React.FC<ReminderModalProps> = ({
             <textarea
               value={newReminder.description}
               onChange={(e) => setNewReminder({ ...newReminder, description: e.target.value })}
-              className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent transition-all resize-none"
+              className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent transition-all resize-none text-[#161A21] dark:text-[#E9EDF5] placeholder:text-[#8D95A3]"
               rows={3}
               placeholder="Additional details about the reminder"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-[#323845] dark:text-[#C7D0DD] mb-2">
                 Date & Time *
@@ -73,7 +73,7 @@ const ReminderModal: React.FC<ReminderModalProps> = ({
                 type="datetime-local"
                 value={newReminder.reminderTime}
                 onChange={(e) => setNewReminder({ ...newReminder, reminderTime: e.target.value })}
-                className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent"
+                className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent text-[#161A21] dark:text-[#E9EDF5]"
                 required
               />
             </div>
@@ -85,7 +85,7 @@ const ReminderModal: React.FC<ReminderModalProps> = ({
               <select
                 value={newReminder.repeat}
                 onChange={(e) => setNewReminder({ ...newReminder, repeat: e.target.value as ReminderRepeat })}
-                className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent"
+                className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent text-[#161A21] dark:text-[#E9EDF5]"
               >
                 <option value="once">Once</option>
                 <option value="daily">Daily</option>
@@ -95,19 +95,9 @@ const ReminderModal: React.FC<ReminderModalProps> = ({
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[#323845] dark:text-[#C7D0DD] mb-2">
-              Telegram Chat ID (Optional)
-            </label>
-            <input
-              type="text"
-              value={newReminder.telegramChatId}
-              onChange={(e) => setNewReminder({ ...newReminder, telegramChatId: e.target.value })}
-              className="w-full px-4 py-3 border border-[#D0C0AE] dark:border-[#2A3442] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B35A3C]/40 dark:focus:ring-[#1E5A58]/50 focus:border-transparent transition-all"
-              placeholder="For Telegram notifications"
-            />
-            <p className="text-xs text-[#6B7481] dark:text-[#8D95A3] mt-1">
-              Enter your Telegram chat ID to get notifications on Telegram
+          <div className="bg-[#E7DED2] dark:bg-[#1B1F2A] rounded-xl p-4 border border-[#D0C0AE]">
+            <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">
+              Telegram notifications are sent automatically once your Telegram is connected.
             </p>
           </div>
 

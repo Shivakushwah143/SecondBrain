@@ -59,5 +59,4 @@ export interface NewReminder {
   description: string;
   reminderTime: string;
   repeat: ReminderRepeat;
-  telegramChatId: string;
 }
