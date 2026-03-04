@@ -1,4 +1,4 @@
-ï»¿import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import {
   FiBell,
   FiBookmark,
@@ -989,7 +989,7 @@ const Dashboard: React.FC = () => {
                                 {collection.originalName}
                               </p>
                               <p className="text-xs text-[#6B7481] dark:text-[#8D95A3]">
-                                {collection.chunks} chunks Â© {formatDate(collection.uploadDate)}
+                                {collection.chunks} chunks © {formatDate(collection.uploadDate)}
                               </p>
                             </div>
                             {selectedCollection === collection._id && (
@@ -1056,78 +1056,80 @@ const Dashboard: React.FC = () => {
 
                 {/* Ask Interface */}
                 {activeTab === 'ai' && (
-                  <div className="bg-[#FBF7F1] dark:bg-[#141821] rounded-2xl shadow-sm border border-[#D0C0AE] dark:border-[#2A3442] p-6">
-                    <div className="flex items-center justify-between mb-6">
+                  <div className="bg-[#FBF7F1] dark:bg-[#141821] rounded-2xl shadow-sm border border-[#D0C0AE] dark:border-[#2A3442] p-4 md:p-6 min-h-[calc(100vh-220px)] md:min-h-0 flex flex-col">
+                    <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h2 className="text-lg font-semibold text-[#161A21] dark:text-[#E9EDF5]">Assistant</h2>
-                        <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">Infrastructure Groq AI</p>
+                        <h2 className="text-lg font-semibold text-[#161A21] dark:text-[#E9EDF5]">SecondBrain AI</h2>
+                        <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">Your personal knowledge assistant</p>
                       </div>
                       <div className="w-10 h-10 bg-[#E7DED2] dark:bg-[#1B1F2A] rounded-xl flex items-center justify-center">
                         <FiCpu className="w-5 h-5 text-white" />
                       </div>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="flex-1 flex flex-col">
                       {aiResponse ? (
-                        <div className="space-y-4">
-                          <div className="bg-[#F3EEE7] dark:bg-[#0E1014] rounded-xl p-4">
-                            <p className="text-[#323845] dark:text-[#C7D0DD]">{aiResponse}</p>
+                        <div className="flex-1 flex flex-col gap-3">
+                          <div className="bg-[#F3EEE7] dark:bg-[#0E1014] rounded-xl p-4 overflow-y-auto">
+                            <p className="text-[#323845] dark:text-[#C7D0DD] whitespace-pre-wrap">{aiResponse}</p>
                           </div>
                           <button
                             onClick={() => setAiResponse('')}
                             className="w-full text-sm text-[#A46A3B] hover:text-[#A46A3B] font-medium"
                           >
-                            Ask a follow-up.
+                            Ask another question
                           </button>
                         </div>
                       ) : (
-                        <>
-                          <div className="bg-[#E7DED2] dark:bg-[#1B1F2A] rounded-xl p-4 border border-[#D0C0AE]">
-                            <div className="flex items-start space-x-3">
-                              <div className="w-8 h-8 bg-[#E7DED2] dark:bg-[#1B1F2A] rounded-lg flex items-center justify-center flex-shrink-0">
-                                <FiZap className="w-4 h-4 text-white" />
-                              </div>
-                              <div>
-                                <p className="text-sm text-[#323845] dark:text-[#C7D0DD]">
-                                  I'm your assistant. Ask anything in your archive, or upload a PDF to build a searchable library.
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-
-                          <form onSubmit={handleAIChat} className="space-y-3">
-                            <div className="relative">
-                              <input
-                                type="text"
-                                value={aiMessage}
-                                onChange={(e) => setAiMessage(e.target.value)}
-                                placeholder="Ask a question..."
-                                className="w-full px-4 py-3 pr-12 border-2 border-[#D0C0AE] dark:border-[#2A3442] rounded-xl bg-[#F3EEE7] dark:bg-[#0E1014] focus:outline-none focus:border-[#B35A3C]/40 focus:ring-2 focus:ring-[#E7DED2] transition-all"
-                                disabled={aiLoading}
-                              />
+                        <div className="flex-1 flex flex-col items-center justify-center text-center px-2">
+                          <h3 className="text-xl font-semibold text-[#161A21] dark:text-[#E9EDF5] mb-2">
+                            What can I help with?
+                          </h3>
+                          <p className="text-sm text-[#6B7481] dark:text-[#9AA3B2] mb-4">
+                            Ask about your captures, PDFs, or general questions.
+                          </p>
+                          <div className="flex flex-wrap justify-center gap-2">
+                            {['Summarize notes', 'Draft an email', 'Explain a concept', 'Find key takeaways'].map((hint) => (
                               <button
-                                type="submit"
-                                disabled={aiLoading || !aiMessage.trim()}
-                                className="absolute right-2 top-2 p-2 bg-[#B35A3C] dark:bg-[#1E5A58] text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                key={hint}
+                                type="button"
+                                onClick={() => setAiMessage(hint)}
+                                className="px-3 py-1.5 text-xs rounded-full border border-[#D0C0AE] dark:border-[#2A3442] bg-[#E7DED2] dark:bg-[#1B1F2A] text-[#323845] dark:text-[#C7D0DD] hover:border-[#B35A3C]/40 transition-colors"
                               >
-                                {aiLoading ? (
-                                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                ) : (
-                                  <FiMessageSquare className="w-4 h-4" />
-                                )}
+                                {hint}
                               </button>
-                            </div>
-                            <p className="text-xs text-[#6B7481] dark:text-[#8D95A3] text-center">
-                              Ask about your Captures, documents, or general knowledge
-                            </p>
-                          </form>
-                        </>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </div>
+
+                    <form onSubmit={handleAIChat} className="mt-4">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={aiMessage}
+                          onChange={(e) => setAiMessage(e.target.value)}
+                          placeholder="Ask SecondBrain AI..."
+                          className="w-full px-4 py-3 pr-12 border-2 border-[#D0C0AE] dark:border-[#2A3442] rounded-xl bg-[#F3EEE7] dark:bg-[#0E1014] focus:outline-none focus:border-[#B35A3C]/40 focus:ring-2 focus:ring-[#E7DED2] transition-all"
+                          disabled={aiLoading}
+                        />
+                        <button
+                          type="submit"
+                          disabled={aiLoading || !aiMessage.trim()}
+                          className="absolute right-2 top-2 p-2 bg-[#B35A3C] dark:bg-[#1E5A58] text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {aiLoading ? (
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          ) : (
+                            <FiMessageSquare className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </form>
                   </div>
                 )}
-
-                {/* Reminders Interface */}
+{/* Reminders Interface */}
                 {activeTab === 'reminders' && (
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
@@ -1276,7 +1278,7 @@ const Dashboard: React.FC = () => {
                           disabled={isConnectingNotion || notionStatus.connected}
                           className="w-full py-3 bg-[#B35A3C] dark:bg-[#1E5A58] text-white font-medium rounded-xl hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {notionStatus.connected ? 'Connected' : isConnectingNotion ? 'Connectingâ€¦' : 'Connect Notion'}
+                          {notionStatus.connected ? 'Connected' : isConnectingNotion ? 'Connecting…' : 'Connect Notion'}
                         </button>
                       </div>
 
@@ -1291,9 +1293,9 @@ const Dashboard: React.FC = () => {
                           </div>
                         </div>
                         <div className="space-y-2 text-sm text-[#515A66] dark:text-[#9AA3B2]">
-                          <p>â€¢ Link one workspace with a single click</p>
-                          <p>â€¢ Keep tokens secure on the server</p>
-                          <p>â€¢ Ready for future sync features</p>
+                          <p>• Link one workspace with a single click</p>
+                          <p>• Keep tokens secure on the server</p>
+                          <p>• Ready for future sync features</p>
                         </div>
                       </div>
                     </div>
@@ -1378,7 +1380,7 @@ const Dashboard: React.FC = () => {
                           {activeTab === 'dashboard' ? 'Recent Captures' : 'All Captures'}
                         </h2>
                         <p className="text-sm text-[#515A66] dark:text-[#9AA3B2]">
-                          {filteredCaptures.length} items Â© {stats.totalCaptures} total
+                          {filteredCaptures.length} items © {stats.totalCaptures} total
                         </p>
                       </div>
                       <div className="flex items-center space-x-2">
@@ -1897,7 +1899,7 @@ const Dashboard: React.FC = () => {
           </div>
 
           <div className="border-t border-[#D0C0AE] dark:border-[#2A3442] mt-8 pt-8 text-center text-sm text-[#6B7481] dark:text-[#8D95A3]">
-            <p>Â© {new Date().getFullYear()} Second Brain. All rights reserved.</p>
+            <p>© {new Date().getFullYear()} Second Brain. All rights reserved.</p>
             <p className="mt-2">Built for people who think long term.</p>
           </div>
         </div>
@@ -1907,6 +1909,7 @@ const Dashboard: React.FC = () => {
 };
 
 export default Dashboard;
+
 
 
 

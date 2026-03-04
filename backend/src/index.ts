@@ -132,11 +132,9 @@ const getGroqResponse = async (prompt: string, context?: string) => {
   try {
     // Try different Groq models in order
     const modelsToTry = [
-      'llama-3.1-70b-versatile',    
-      'llama-3.1-8b-instant',      
-      'mixtral-8x7b-32768',        
-      'gemma2-9b-it'                
-    ];
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant'
+  ];
 
     for (const model of modelsToTry) {
       try {
@@ -184,6 +182,67 @@ const getGroqResponse = async (prompt: string, context?: string) => {
     return `⚠️ AI service error: ${error.message}`;
   }
 };
+const TELEGRAM_AI_SYSTEM_PROMPT =
+  'You are a senior professional content writer with 5+ years of experience. ' +
+  'You write high-quality emails, cold outreach, LinkedIn posts, Twitter/X threads, captions, hooks, CTAs, and content ideas. ' +
+  'You can rewrite, summarize, improve tone, and suggest variations. ' +
+  'Be concise, structured, and practical. If the request is unclear, ask 1-2 clarifying questions.';
+
+const getTelegramAiResponse = async (
+  message: string,
+  history?: { role: 'user' | 'assistant'; content: string }[],
+  systemPrompt?: string
+) => {
+  const groq = initializeGroqClient();
+  if (!groq) {
+    throw new Error('AI service not configured. Please add GROQ_API_KEY to .env.');
+  }
+
+  const modelsToTry = [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant'
+  ];
+
+  const safeHistory = Array.isArray(history)
+    ? history.filter((item) => item && (item.role === 'user' || item.role === 'assistant') && item.content)
+    : [];
+
+  const baseMessages: any[] = [
+    { role: 'system', content: systemPrompt || TELEGRAM_AI_SYSTEM_PROMPT }
+  ];
+
+  if (safeHistory.length > 0) {
+    baseMessages.push(...safeHistory.slice(-10));
+  } else {
+    baseMessages.push({ role: 'user', content: message });
+  }
+
+  const last = baseMessages[baseMessages.length - 1];
+  if (last?.role !== 'user') {
+    baseMessages.push({ role: 'user', content: message });
+  }
+
+  for (const model of modelsToTry) {
+    try {
+      const completion = await groq.chat.completions.create({
+        messages: baseMessages,
+        model,
+        temperature: 0.7,
+        max_tokens: 350,
+      });
+
+      const response = completion.choices[0]?.message?.content;
+      if (response) {
+        return response;
+      }
+    } catch (error: any) {
+      console.log(`Telegram AI model ${model} failed: ${error.message?.split('\n')[0]}`);
+      continue;
+    }
+  }
+
+  throw new Error('All AI models failed. Please try again later.');
+};
 
 const getEmbedding = async (text: string): Promise<number[]> => {
   const words = text.toLowerCase().split(/\W+/);
@@ -204,6 +263,8 @@ class TelegramReminderBot {
   public bot: TelegramBot | null = null;
   public isActive = true;
   private userSessions = new Map<string, any>(); // chatId -> session data
+  private aiSessions = new Map<string, { history: { role: 'user' | 'assistant'; content: string }[] }>();
+  private aiModeSessions = new Map<string, 'write_tweet' | 'linkedin_post' | 'comment_post' | 'write_email'>();
 
   constructor() {
     if (TELEGRAM_BOT_TOKEN) {
@@ -311,6 +372,12 @@ class TelegramReminderBot {
             '• View saved content with `/mycontent`\n' +
             '• Set reminders for important content'
           );
+
+          await this.bot!.sendMessage(
+            chatId,
+            'Choose an action below:',
+            this.getMainMenuMarkup()
+          );
           return;
         } catch (error) {
           await this.sendMessage(chatId, '❌ Linking failed. Please try again from the app.');
@@ -324,10 +391,13 @@ class TelegramReminderBot {
         '📱 **Quick Start:**\n' +
         '1. Link your account from the web app\n' +
         '2. Then save content using `/addcontent`\n\n' +
-        '💡 **Try these commands:**\n' +
-        '• /addcontent - Save YouTube/Twitter links\n' +
-        '• /mycontent - View your saved items\n' +
-        '• /help - See all commands'
+        '💡 **Use the buttons below** or type /help for commands.'
+      );
+
+      await this.bot!.sendMessage(
+        chatId,
+        'Choose an action below:',
+        this.getMainMenuMarkup()
       );
     });
 
@@ -396,38 +466,7 @@ class TelegramReminderBot {
     // Add content with full form (like web interface)
     this.bot.onText(/\/addcontent/, async (msg: any) => {
       const chatId = msg.chat.id;
-      const sessionId = `${chatId}`;
-      
-      // Start new session
-      this.userSessions.set(sessionId, {
-        step: 'type',
-        data: { tags: [] }
-      });
-
-      const options = {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '🎵 YouTube Video', callback_data: 'type_youtube' },
-              { text: '🐦 Tweet/X Post', callback_data: 'type_twitter' }
-            ],
-            [
-              { text: '❌ Cancel', callback_data: 'cancel' }
-            ]
-          ]
-        }
-      };
-
-      await this.bot!.sendMessage(chatId,
-        '📝 **Let\'s save some content!**\n\n' +
-        'This is just like the web app. We\'ll collect:\n\n' +
-        '1️⃣ **Type** (YouTube/Twitter)\n' +
-        '2️⃣ **Title** (Descriptive name)\n' +
-        '3️⃣ **URL** (The link)\n' +
-        '4️⃣ **Tags** (Optional, comma-separated)\n\n' +
-        '**Step 1: Choose content type:**',
-        options
-      );
+      await this.startAddContentFlow(chatId);
     });
 
     // Quick add command (just link)
@@ -458,6 +497,44 @@ class TelegramReminderBot {
       const data = callbackQuery.data;
       const sessionId = `${chatId}`;
       const session = this.userSessions.get(sessionId);
+
+      await this.bot!.answerCallbackQuery(callbackQuery.id);
+
+      if (data === 'add_content') {
+        await this.startAddContentFlow(chatId);
+        return;
+      }
+
+      if (data === 'my_content') {
+        await this.sendMyContent(chatId);
+        return;
+      }
+
+      if (data === 'reminders') {
+        await this.sendReminders(chatId);
+        return;
+      }
+
+      if (data === 'ai_assistant') {
+        await this.sendMessage(chatId, 'Choose a writing mode:', this.getAiModeMarkup());
+        return;
+      }
+
+      if (data.startsWith('ai_mode_')) {
+        const mode = data.replace('ai_mode_', '') as 'write_tweet' | 'linkedin_post' | 'comment_post' | 'write_email';
+        this.aiModeSessions.set(chatId.toString(), mode);
+        await this.sendMessage(chatId, 'Mode set. Send your prompt.');
+        return;
+      }
+
+      if (data === 'link_account') {
+        await this.sendMessage(chatId,
+          '🔗 **Link your account**\n\n' +
+          'Open the web app → Telegram tab → Connect Telegram.\n' +
+          'Then come back here and tap /start again.'
+        );
+        return;
+      }
 
       // Remove inline keyboard
       await this.bot!.editMessageReplyMarkup(
@@ -504,7 +581,10 @@ class TelegramReminderBot {
       
       if (!session) {
         // Check if it's a direct link
-        await this.handleDirectLink(msg);
+        const handled = await this.handleDirectLink(msg);
+        if (!handled) {
+          await this.handleTelegramAi(msg);
+        }
         return;
       }
 
@@ -676,6 +756,17 @@ class TelegramReminderBot {
       }
     });
 
+    // View reminders
+    this.bot.onText(/\/reminders/, async (msg: any) => {
+      const chatId = msg.chat.id;
+      await this.sendReminders(chatId);
+    });
+
+    // AI writer command
+    this.bot.onText(/\/ai/, async (msg: any) => {
+      const chatId = msg.chat.id;
+      await this.sendMessage(chatId, 'Choose a writing mode:', this.getAiModeMarkup());
+    });
     // Status command
     this.bot.onText(/\/status/, async (msg: any) => {
       const chatId = msg.chat.id;
@@ -695,8 +786,199 @@ class TelegramReminderBot {
 
   // ============ HELPER METHODS ============
 
-  // Handle direct link messages
-  private async handleDirectLink(msg: any) {
+  private getAiModeMarkup() {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: 'Tweet', callback_data: 'ai_mode_write_tweet' },
+            { text: 'LinkedIn', callback_data: 'ai_mode_linkedin_post' }
+          ],
+          [
+            { text: 'Comment', callback_data: 'ai_mode_comment_post' },
+            { text: 'Email', callback_data: 'ai_mode_write_email' }
+          ]
+        ]
+      }
+    };
+  }
+
+  private getTelegramAiSystemPrompt(mode: 'write_tweet' | 'linkedin_post' | 'comment_post' | 'write_email') {
+    const base =
+      'You are SecondBrain AI � a sharp, human content creator with 5+ years of experience.\n\n' +
+      'Rules:\n' +
+      '- Keep all responses short.\n' +
+      '- Never write long paragraphs.\n' +
+      '- No generic templates.\n' +
+      '- No robotic tone.\n' +
+      '- Sound like a real person.\n' +
+      '- Slightly conversational.\n' +
+      '- Light emotion when appropriate.\n' +
+      '- Use max 1 emoji only when it fits naturally.\n' +
+      '- Be clear and confident.\n' +
+      '- Avoid filler words.';
+
+    switch (mode) {
+      case 'write_tweet':
+        return base +
+          '\n\nTweet Mode:\n' +
+          '- Write a short, punchy tweet under 220 characters.\n' +
+          '- Make it engaging and human.\n' +
+          '- No hashtags unless necessary.';
+      case 'linkedin_post':
+        return base +
+          '\n\nLinkedIn Post Mode:\n' +
+          '- Write a short LinkedIn post.\n' +
+          '- Max 6 lines.\n' +
+          '- Professional but human.\n' +
+          '- Clear message. No fluff.';
+      case 'comment_post':
+        return base +
+          '\n\nComment Mode:\n' +
+          '- Write a short, thoughtful comment.\n' +
+          '- 2�3 lines max.\n' +
+          '- Sound natural and smart.';
+      case 'write_email':
+      default:
+        return base +
+          '\n\nEmail Mode:\n' +
+          '- Write a short professional email.\n' +
+          '- Direct and confident.\n' +
+          '- No formal clich�s.\n' +
+          '- Max 8 lines.';
+    }
+  }
+  private getMainMenuMarkup() {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: 'Add Content', callback_data: 'add_content' },
+            { text: 'My Content', callback_data: 'my_content' }
+          ],
+          [
+            { text: 'Reminders', callback_data: 'reminders' },
+            { text: 'Link Account', callback_data: 'link_account' }
+          ],
+          [
+            { text: 'AI Writer', callback_data: 'ai_assistant' }
+          ]
+        ]
+      }
+    };
+  }
+
+  private async startAddContentFlow(chatId: string) {
+    const sessionId = `${chatId}`;
+
+    this.userSessions.set(sessionId, {
+      step: 'type',
+      data: { tags: [] }
+    });
+
+    const options = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: 'YouTube Video', callback_data: 'type_youtube' },
+            { text: 'Tweet/X Post', callback_data: 'type_twitter' }
+          ],
+          [
+            { text: 'Cancel', callback_data: 'cancel' }
+          ]
+        ]
+      }
+    };
+
+    await this.bot!.sendMessage(chatId,
+      'Lets save some content!\n\n' +
+      'We will collect:\n' +
+      '1) Type\n' +
+      '2) Title\n' +
+      '3) URL\n' +
+      '4) Tags (optional)\n\n' +
+      'Step 1: Choose content type:',
+      options
+    );
+  }
+
+  private async sendMyContent(chatId: string) {
+    try {
+      await this.bot!.sendChatAction(chatId, 'typing');
+
+      const response = await fetch(`http://localhost:${PORT}/api/v1/telegram/content/list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telegramChatId: chatId.toString(),
+          limit: 5
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        if (data.content.length === 0) {
+          await this.sendMessage(chatId,
+            'No content yet.\n\n' +
+            'Try:\n' +
+            '/addcontent - Add with form\n' +
+            'Send a YouTube/Twitter link\n' +
+            '/quickadd <link> - Quick save'
+          );
+          return;
+        }
+
+        let message = `Your Recent Content (${data.count} total)\n\n`;
+
+        data.content.forEach((item: any, index: number) => {
+          const date = new Date(item.createdAt).toLocaleDateString();
+          const tags = item.tags?.length > 0 ? `\n   Tags: ${item.tags.join(', ')}` : '';
+
+          message += `${index + 1}. ${item.title}\n`;
+          message += `   ${date}${tags}\n\n`;
+        });
+
+        await this.sendMessage(chatId, message);
+      } else {
+        await this.sendMessage(chatId,
+          'Account not linked.\n\n' +
+          'Link your account in the web app and try again.'
+        );
+      }
+    } catch (error) {
+      await this.sendMessage(chatId, 'Error fetching content. Please try again.');
+    }
+  }
+
+  private async sendReminders(chatId: string) {
+    try {
+      const reminders = await Reminder.find({ telegramChatId: chatId.toString(), isActive: true })
+        .sort({ reminderTime: 1 })
+        .limit(5)
+        .select('title reminderTime repeat');
+
+      if (!reminders.length) {
+        await this.sendMessage(chatId,
+          'No active reminders.\n\n' +
+          'Create reminders in the web app (Reminders tab).'
+        );
+        return;
+      }
+
+      let message = `Your Active Reminders\n\n`;
+      reminders.forEach((reminder: any, index: number) => {
+        const date = new Date(reminder.reminderTime).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        message += `${index + 1}. ${reminder.title}\n   ${date}\n   ${reminder.repeat}\n\n`;
+      });
+
+      await this.sendMessage(chatId, message);
+    } catch (error) {
+      await this.sendMessage(chatId, 'Error fetching reminders. Please try again.');
+    }
+  }
+// Handle direct link messages
+  private async handleDirectLink(msg: any): Promise<boolean> {
     const chatId = msg.chat.id;
     const text = msg.text.trim();
     
@@ -721,23 +1003,94 @@ class TelegramReminderBot {
           }
         });
         
-        const emoji = type === 'youtube' ? '🎵' : '🐦';
+        const emoji = type === 'youtube' ? '[YT]' : '[TW]';
         await this.bot!.sendMessage(chatId,
           `${emoji} **I found a ${type} link!**\n\n` +
           'Let\'s save it properly:\n\n' +
-          '📝 **Please provide a title:**\n\n' +
+          'Title required:\n\n' +
           'Examples:\n' +
-          '• "React Tutorial"\n' +
-          '• "Important Announcement"\n' +
-          '• "Conference Talk"\n\n' +
+          '� "React Tutorial"\n' +
+          '� "Important Announcement"\n' +
+          '� "Conference Talk"\n\n' +
           'Or use `/cancel` to abort.',
           { parse_mode: 'Markdown' }
         );
+        return true;
       }
+    }
+    return false;
+  }
+
+  private async handleTelegramAi(msg: any) {
+    const chatId = msg.chat.id;
+    const telegramUserId = msg.from?.id?.toString() || chatId.toString();
+    const message = msg.text.trim();
+
+    if (!message) return;
+
+    const historyEntry = this.aiSessions.get(telegramUserId);
+    const history = [
+      ...(historyEntry?.history ?? []),
+      { role: 'user' as const, content: message }
+    ];
+
+    const mode = this.aiModeSessions.get(chatId.toString());
+    if (!mode) {
+      await this.sendMessage(chatId, 'Choose a writing mode:', this.getAiModeMarkup());
+      return;
+    }
+    const systemPrompt = this.getTelegramAiSystemPrompt(mode);
+
+    try {
+      await this.bot!.sendChatAction(chatId, 'typing');
+
+      const response = await fetch(`http://localhost:${PORT}/api/telegram/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: telegramUserId,
+          message,
+          history,
+          systemPrompt
+        })
+      });
+
+      const data = await response.json();
+      const reply = data?.reply || 'Sorry, I could not generate a response.';
+      const chunks = this.splitTelegramMessage(reply, 3800);
+
+      for (const chunk of chunks) {
+        await this.sendMessage(chatId, chunk, { parse_mode: false, disable_web_page_preview: true });
+      }
+
+      const nextHistory = history
+        .concat({ role: 'assistant' as const, content: reply })
+        .slice(-10);
+      this.aiSessions.set(telegramUserId, { history: nextHistory });
+    } catch (error) {
+      await this.sendMessage(chatId, 'AI service error. Please try again.');
     }
   }
 
-  // Quick save (just link with auto-generated title)
+  private splitTelegramMessage(text: string, maxLength: number) {
+    if (text.length <= maxLength) return [text];
+    const chunks: string[] = [];
+    let remaining = text;
+
+    while (remaining.length > maxLength) {
+      let slice = remaining.slice(0, maxLength);
+      const lastBreak = Math.max(slice.lastIndexOf('\n'), slice.lastIndexOf('. '));
+      if (lastBreak > 200) {
+        slice = slice.slice(0, lastBreak + 1);
+      }
+      chunks.push(slice.trim());
+      remaining = remaining.slice(slice.length);
+    }
+
+    if (remaining.trim().length > 0) chunks.push(remaining.trim());
+    return chunks;
+  }
+// Quick save (just link with auto-generated title)
   private async quickSaveContent(chatId: number, link: string, type: string) {
     try {
       await this.bot!.sendChatAction(chatId, 'typing');
@@ -1067,6 +1420,11 @@ app.post('/api/v1/signin', async (req, res) => {
 
     const user = await User.findOne({ username });
     if (!user) {
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
+
+    if (!user.password) {
       res.status(401).json({ message: 'Invalid credentials' });
       return;
     }
@@ -1665,6 +2023,24 @@ app.post('/api/v1/ai/chat', authMiddleware, async (req, res) => {
     });
   }
 });
+app.post('/api/telegram/ai', async (req, res) => {
+  try {
+    const { userId, message,
+          history,
+          systemPrompt } = req.body;
+
+    if (!userId || !message) {
+      res.status(400).json({ message: 'userId and message are required' });
+      return;
+    }
+
+    const reply = await getTelegramAiResponse(String(message), history, systemPrompt);
+    res.json({ reply });
+  } catch (error: any) {
+    console.error('Telegram AI error:', error);
+    res.status(500).json({ message: error?.message || 'Telegram AI failed' });
+  }
+});
 
 // 🔗 SHARING SYSTEM (MongoDB) - UNCHANGED
 app.post('/api/v1/brain/share', authMiddleware, async (req, res) => {
@@ -2135,7 +2511,7 @@ app.post('/api/v1/telegram/content/list', async (req, res) => {
     }
 
     // Get user's content
-    const content = await Content.find({ userId: user._id })
+    const content = await Content.find({ userId: user._id.toString() })
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .select('title link type tags createdAt');
@@ -2178,7 +2554,7 @@ app.post('/api/v1/telegram/content/list', async (req, res) => {
     }
 
     // Get user's content
-    const content = await Content.find({ userId: user._id })
+    const content = await Content.find({ userId: user._id.toString() })
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .select('title link type tags createdAt');
@@ -2361,7 +2737,5 @@ app.listen(PORT, () => {
 
 // Export for testing
 export default app;
-
-
 
 
